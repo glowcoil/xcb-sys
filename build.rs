@@ -26,7 +26,10 @@ fn main() {
     headers.push("dri3");
 
     #[cfg(feature = "ewmh")]
-    headers.push("xcb_ewmh");
+    {
+        headers.push("xcb_ewmh");
+        println!("cargo:rustc-link-lib=xcb-ewmh");
+    }
 
     #[cfg(feature = "ge")]
     headers.push("ge");
@@ -35,13 +38,22 @@ fn main() {
     headers.push("glx");
 
     #[cfg(feature = "icccm")]
-    headers.push("xcb_icccm");
+    {
+        headers.push("xcb_icccm");
+        println!("cargo:rustc-link-lib=xcb-icccm");
+    }
 
     #[cfg(feature = "image")]
-    headers.push("xcb_image");
+    {
+        headers.push("xcb_image");
+        println!("cargo:rustc-link-lib=xcb-image");
+    }
 
     #[cfg(feature = "keysyms")]
-    headers.push("xcb_keysyms");
+    {
+        headers.push("xcb_keysyms");
+        println!("cargo:rustc-link-lib=xcb-keysyms");
+    }
 
     #[cfg(feature = "present")]
     headers.push("present");
