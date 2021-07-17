@@ -11,19 +11,34 @@ fn main() {
     headers.push("bigreq");
 
     #[cfg(feature = "composite")]
-    headers.push("composite");
+    {
+        headers.push("composite");
+        println!("cargo:rustc-link-lib=xcb-composite");
+    }
 
     #[cfg(feature = "damage")]
-    headers.push("damage");
+    {
+        headers.push("damage");
+        println!("cargo:rustc-link-lib=xcb-damage");
+    }
 
     #[cfg(feature = "dpms")]
-    headers.push("dpms");
+    {
+        headers.push("dpms");
+        println!("cargo:rustc-link-lib=xcb-dpms");
+    }
 
     #[cfg(feature = "dri2")]
-    headers.push("dri2");
+    {
+        headers.push("dri2");
+        println!("cargo:rustc-link-lib=xcb-dri2");
+    }
 
     #[cfg(feature = "dri3")]
-    headers.push("dri3");
+    {
+        headers.push("dri3");
+        println!("cargo:rustc-link-lib=xcb-dri3");
+    }
 
     #[cfg(feature = "ewmh")]
     {
@@ -32,10 +47,16 @@ fn main() {
     }
 
     #[cfg(feature = "ge")]
-    headers.push("ge");
+    {
+        headers.push("ge");
+        println!("cargo:rustc-link-lib=xcb-ge");
+    }
 
     #[cfg(feature = "glx")]
-    headers.push("glx");
+    {
+        headers.push("glx");
+        println!("cargo:rustc-link-lib=xcb-glx");
+    }
 
     #[cfg(feature = "icccm")]
     {
@@ -56,67 +77,118 @@ fn main() {
     }
 
     #[cfg(feature = "present")]
-    headers.push("present");
+    {
+        headers.push("present");
+        println!("cargo:rustc-link-lib=xcb-present");
+    }
 
     #[cfg(feature = "randr")]
-    headers.push("randr");
+    {
+        headers.push("randr");
+        println!("cargo:rustc-link-lib=xcb-randr");
+    }
 
     #[cfg(feature = "record")]
-    headers.push("record");
+    {
+        headers.push("record");
+        println!("cargo:rustc-link-lib=xcb-record");
+    }
 
     #[cfg(feature = "render")]
-    headers.push("render");
+    {
+        headers.push("render");
+        println!("cargo:rustc-link-lib=xcb-render");
+    }
 
     #[cfg(feature = "res")]
-    headers.push("res");
+    {
+        headers.push("res");
+        println!("cargo:rustc-link-lib=xcb-res");
+    }
 
     #[cfg(feature = "screensaver")]
-    headers.push("screensaver");
+    {
+        headers.push("screensaver");
+        println!("cargo:rustc-link-lib=xcb-screensaver");
+    }
 
     #[cfg(feature = "shape")]
-    headers.push("shape");
+    {
+        headers.push("shape");
+        println!("cargo:rustc-link-lib=xcb-shape");
+    }
 
     #[cfg(feature = "shm")]
-    headers.push("shm");
+    {
+        headers.push("shm");
+        println!("cargo:rustc-link-lib=xcb-shm");
+    }
 
     #[cfg(feature = "sync")]
-    headers.push("sync");
+    {
+        headers.push("sync");
+        println!("cargo:rustc-link-lib=xcb-sync");
+    }
 
     #[cfg(feature = "xc_misc")]
     headers.push("xc_misc");
 
-    #[cfg(feature = "xevie")]
-    headers.push("xevie");
-
     #[cfg(feature = "xf86dri")]
-    headers.push("xf86dri");
+    {
+        headers.push("xf86dri");
+        println!("cargo:rustc-link-lib=xcb-xf86dri");
+    }
 
     #[cfg(feature = "xfixes")]
-    headers.push("xfixes");
+    {
+        headers.push("xfixes");
+        println!("cargo:rustc-link-lib=xcb-xfixes");
+    }
 
     #[cfg(feature = "xinerama")]
-    headers.push("xinerama");
+    {
+        headers.push("xinerama");
+        println!("cargo:rustc-link-lib=xcb-xinerama");
+    }
 
     #[cfg(feature = "xinput")]
-    headers.push("xinput");
+    {
+        headers.push("xinput");
+        println!("cargo:rustc-link-lib=xcb-xinput");
+    }
 
     #[cfg(feature = "xkb")]
-    headers.push("xkb");
+    {
+        headers.push("xkb");
+        println!("cargo:rustc-link-lib=xcb-xkb");
+    }
 
     #[cfg(feature = "xprint")]
     headers.push("xprint");
 
     #[cfg(feature = "xselinux")]
-    headers.push("xselinux");
+    {
+        headers.push("xselinux");
+        println!("cargo:rustc-link-lib=xcb-xselinux");
+    }
 
     #[cfg(feature = "xtest")]
-    headers.push("xtest");
+    {
+        headers.push("xtest");
+        println!("cargo:rustc-link-lib=xcb-xtest");
+    }
 
     #[cfg(feature = "xv")]
-    headers.push("xv");
+    {
+        headers.push("xv");
+        println!("cargo:rustc-link-lib=xcb-xv");
+    }
 
     #[cfg(feature = "xvmc")]
-    headers.push("xvmc");
+    {
+        headers.push("xvmc");
+        println!("cargo:rustc-link-lib=xcb-xvmc");
+    }
 
     let mut wrapper = String::new();
     for header in headers {
