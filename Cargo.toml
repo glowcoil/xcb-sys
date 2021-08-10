@@ -16,6 +16,7 @@ bindgen = "0.57.0"
 [features]
 bigreq = []
 composite = ["xfixes"]
+cursor = []
 damage = ["xfixes"]
 dpms = []
 dri2 = []

@@ -16,6 +16,12 @@ fn main() {
         println!("cargo:rustc-link-lib=xcb-composite");
     }
 
+    #[cfg(feature = "cursor")]
+    {
+        headers.push("xcb_cursor");
+        println!("cargo:rustc-link-lib=xcb-cursor");
+    }
+
     #[cfg(feature = "damage")]
     {
         headers.push("damage");
