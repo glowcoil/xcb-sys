@@ -84,7 +84,7 @@ fn convert_name(name: &str) -> String {
 pub fn gen(sources: &[&str], out_path: &Path) {
     let mut writer = BufWriter::new(File::create(out_path).unwrap());
 
-    for source in sources {
+    for &source in sources {
         let mut path = Path::new("xml").join(source);
         path.set_extension("xml");
         let bytes = fs::read(path).unwrap();
@@ -96,6 +96,12 @@ pub fn gen(sources: &[&str], out_path: &Path) {
             panic!();
         }
 
+        let module_prefix = if source == "xproto" {
+            String::from("")
+        } else {
+            String::from(source) + "_"
+        };
+
         writeln!(writer, "pub mod {source} {{").unwrap();
 
         for child in root.children() {
@@ -103,7 +109,7 @@ pub fn gen(sources: &[&str], out_path: &Path) {
                 match child.tag_name().name() {
                     "struct" => {
                         let name = convert_name(child.attribute("name").unwrap());
-                        writeln!(writer, "pub struct xcb_{name}_t {{}}").unwrap();
+                        writeln!(writer, "pub struct xcb_{module_prefix}{name}_t {{}}").unwrap();
                     }
                     _ => {}
                 }
