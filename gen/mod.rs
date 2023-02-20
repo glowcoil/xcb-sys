@@ -229,7 +229,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     "import" => {
                         imports.push(child.text().unwrap().to_string());
                     }
-                    "xidtype" => {
+                    "xidtype" | "xidunion" => {
                         let name = child.attribute("name").unwrap().to_string();
                         let type_name =
                             convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
