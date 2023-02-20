@@ -73,26 +73,29 @@ fn convert_name(name: &str) -> String {
                 }
             // [A-Z0-9]+(?![a-z])
             } else {
-                let mut tmp = String::new();
-                tmp.extend(c.to_lowercase());
-
-                while let Some(c) = chars.next_if(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-                {
-                    tmp.extend(c.to_lowercase());
-                }
-
-                if let Some(next) = chars.peek() {
-                    if next.is_ascii_lowercase() {
-                        continue;
-                    }
-                }
-
                 if !first {
                     out.push('_');
                 }
                 first = false;
 
-                out.push_str(&tmp);
+                out.extend(c.to_lowercase());
+
+                while let Some(&next) = chars.peek() {
+                    if !(next.is_ascii_uppercase() || next.is_ascii_digit()) {
+                        break;
+                    }
+
+                    let mut lookahead = chars.clone();
+                    lookahead.next();
+                    if let Some(next_next) = lookahead.next() {
+                        if next_next.is_ascii_lowercase() {
+                            break;
+                        }
+                    }
+
+                    out.extend(next.to_lowercase());
+                    chars.next();
+                }
             }
         // [a-z]+
         } else if c.is_ascii_lowercase() {
