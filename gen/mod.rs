@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::str::FromStr;
 
 use roxmltree::Document;
 
@@ -29,6 +30,28 @@ fn convert_type_name(extension_name: Option<&str>, name: &str) -> String {
     out.push_str("_t");
 
     out
+}
+
+fn convert_enum_item_name(
+    extension_name: Option<&str>,
+    enum_name: &str,
+    item_name: &str,
+) -> String {
+    let mut out = String::new();
+
+    out.push_str("xcb_");
+
+    if let Some(extension_name) = extension_name {
+        out.push_str(&convert_extension_name(extension_name));
+        out.push('_');
+    }
+
+    out.push_str(&convert_name(enum_name));
+    out.push('_');
+
+    out.push_str(&convert_name(item_name));
+
+    out.to_uppercase()
 }
 
 fn convert_extension_name(name: &str) -> String {
@@ -174,6 +197,7 @@ struct Type {
 #[derive(Debug)]
 enum Kind {
     Id,
+    Enum { items: Vec<(String, u32)> },
     TypeDef { value: String },
     Struct { fields: Vec<Field> },
     Union { fields: Vec<Field> },
@@ -241,6 +265,44 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             Type {
                                 name: type_name,
                                 kind: Kind::Id,
+                            },
+                        );
+                    }
+                    "enum" => {
+                        let name = child.attribute("name").unwrap().to_string();
+                        let type_name =
+                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+
+                        let mut items = Vec::new();
+                        for child in child.children() {
+                            if child.is_element() {
+                                if child.tag_name().name() == "item" {
+                                    let item_name = child.attribute("name").unwrap();
+                                    let full_item_name = convert_enum_item_name(
+                                        extension_name.as_ref().map(|s| &**s),
+                                        &name,
+                                        item_name,
+                                    );
+
+                                    let choice = child.first_element_child().unwrap();
+                                    let value = match choice.tag_name().name() {
+                                        "value" => u32::from_str(choice.text().unwrap()).unwrap(),
+                                        "bit" => {
+                                            1 << u32::from_str(choice.text().unwrap()).unwrap()
+                                        }
+                                        _ => panic!(),
+                                    };
+
+                                    items.push((full_item_name, value));
+                                }
+                            }
+                        }
+
+                        types.insert(
+                            name,
+                            Type {
+                                name: type_name,
+                                kind: Kind::Enum { items },
                             },
                         );
                     }
@@ -372,12 +434,29 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             writeln!(writer, "    }}").unwrap();
         }
 
+        let mut id_names = BTreeSet::new();
+        for type_ in module.types.values() {
+            if let Kind::Id = &type_.kind {
+                id_names.insert(&type_.name);
+            }
+        }
+
         for type_ in module.types.values() {
             let type_name = &type_.name;
 
             match &type_.kind {
                 Kind::Id => {
                     writeln!(writer, "    pub type {type_name} = u32;").unwrap();
+                }
+                Kind::Enum { items } => {
+                    // Some source files contain duplicate xidtype and enum declarations, so don't output an enum type
+                    // alias if there's already one from the xidtype.
+                    if !id_names.contains(type_name) {
+                        writeln!(writer, "    pub type {type_name} = u32;").unwrap();
+                    }
+                    for (name, value) in items {
+                        writeln!(writer, "    pub const {name}: {type_name} = {value};").unwrap();
+                    }
                 }
                 Kind::TypeDef { value } => {
                     let field_type = ast
