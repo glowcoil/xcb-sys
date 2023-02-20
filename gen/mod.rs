@@ -302,7 +302,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         }
 
         let header_name = header.to_string();
-        let extension_name = root.attribute("extension-name").map(|s| s.to_lowercase());
+        let extension_name = root.attribute("extension-name").map(|s| s.to_string());
         let major_version = root.attribute("major-version").map(|s| s.to_string());
         let minor_version = root.attribute("minor-version").map(|s| s.to_string());
 
