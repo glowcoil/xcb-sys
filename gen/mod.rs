@@ -369,7 +369,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             writeln!(writer, "    }}").unwrap();
         }
 
-        for (_, type_) in &module.types {
+        for type_ in module.types.values() {
             let type_name = &type_.name;
 
             match &type_.kind {
