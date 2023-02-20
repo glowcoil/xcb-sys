@@ -195,7 +195,13 @@ struct Field {
 enum FieldType {
     Name(String),
     Padding(u32),
-    List(String, u32),
+    List(String, LengthExpr),
+}
+
+#[derive(Debug)]
+enum LengthExpr {
+    Fixed(u32),
+    None,
 }
 
 fn parse_fields(node: Node) -> Vec<Field> {
@@ -224,18 +230,27 @@ fn parse_fields(node: Node) -> Vec<Field> {
                     }
                 }
                 "list" => {
-                    if let Some(expr) = child.first_element_child() {
-                        if expr.tag_name().name() == "value" {
-                            let field_name = sanitize(child.attribute("name").unwrap()).to_string();
-                            let field_type = child.attribute("type").unwrap().to_string();
-
-                            let length = u32::from_str(expr.text().unwrap()).unwrap();
-                            fields.push(Field {
-                                name: field_name,
-                                type_: FieldType::List(field_type, length),
-                            });
+                    let length = if let Some(expr) = child.first_element_child() {
+                        match expr.tag_name().name() {
+                            "value" => {
+                                LengthExpr::Fixed(u32::from_str(expr.text().unwrap()).unwrap())
+                            }
+                            _ => {
+                                // TODO: handle other types of list length expressions
+                                continue;
+                            }
                         }
-                    }
+                    } else {
+                        LengthExpr::None
+                    };
+
+                    let field_name = sanitize(child.attribute("name").unwrap()).to_string();
+                    let field_type = child.attribute("type").unwrap().to_string();
+
+                    fields.push(Field {
+                        name: field_name,
+                        type_: FieldType::List(field_type, length),
+                    });
                 }
                 _ => {}
             }
@@ -256,12 +271,17 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
             FieldType::Padding(padding) => {
                 format!("[u8; {padding}]")
             }
-            FieldType::List(type_name, length) => {
-                let resolved_type = ast
-                    .lookup(header_name, type_name)
-                    .unwrap_or_else(|| panic!("{}", type_name))
-                    .to_string();
-                format!("[{resolved_type}; {length}]")
+            FieldType::List(type_name, length_expr) => {
+                if let LengthExpr::Fixed(length) = &length_expr {
+                    let resolved_type = ast
+                        .lookup(header_name, type_name)
+                        .unwrap_or_else(|| panic!("{}", type_name))
+                        .to_string();
+                    format!("[{resolved_type}; {length}]")
+                } else {
+                    // Only generate fixed-size lists as struct fields
+                    continue;
+                }
             }
         };
         writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
