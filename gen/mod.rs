@@ -37,8 +37,8 @@ fn sanitize(name: &str) -> &str {
 
 fn convert_extension_name(name: &str) -> String {
     match name {
-        "XPrint" | "XCMisc" | "BigRequests" => name.to_lowercase(),
-        _ => convert_name(name),
+        "XPrint" | "XCMisc" | "BigRequests" => convert_name(name),
+        _ => name.to_lowercase(),
     }
 }
 
