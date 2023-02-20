@@ -7,51 +7,32 @@ use std::str::FromStr;
 
 use roxmltree::{Document, Node};
 
+fn join(pieces: &[&str]) -> String {
+    let mut iter = pieces.iter();
+
+    let first = if let Some(first) = iter.next() {
+        first
+    } else {
+        return String::new();
+    };
+
+    let mut out = String::new();
+    out.push_str(first);
+
+    for piece in iter {
+        out.push('_');
+        out.push_str(piece);
+    }
+
+    out
+}
+
 fn sanitize(name: &str) -> &str {
     match name {
         "type" => "type_",
         "match" => "match_",
         name => name,
     }
-}
-
-fn convert_type_name(extension_name: Option<&str>, name: &str) -> String {
-    let mut out = String::new();
-
-    out.push_str("xcb_");
-
-    if let Some(extension_name) = extension_name {
-        out.push_str(&convert_extension_name(extension_name));
-        out.push('_');
-    }
-
-    out.push_str(&convert_name(name));
-
-    out.push_str("_t");
-
-    out
-}
-
-fn convert_enum_item_name(
-    extension_name: Option<&str>,
-    enum_name: &str,
-    item_name: &str,
-) -> String {
-    let mut out = String::new();
-
-    out.push_str("xcb_");
-
-    if let Some(extension_name) = extension_name {
-        out.push_str(&convert_extension_name(extension_name));
-        out.push('_');
-    }
-
-    out.push_str(&convert_name(enum_name));
-    out.push('_');
-
-    out.push_str(&convert_name(item_name));
-
-    out.to_uppercase()
 }
 
 fn convert_extension_name(name: &str) -> String {
@@ -182,6 +163,7 @@ impl Ast {
 #[derive(Debug)]
 struct Module {
     extension_name: Option<String>,
+    prefix: String,
     major_version: Option<String>,
     minor_version: Option<String>,
     imports: Vec<String>,
@@ -324,6 +306,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let major_version = root.attribute("major-version").map(|s| s.to_string());
         let minor_version = root.attribute("minor-version").map(|s| s.to_string());
 
+        let mut prefix = "xcb".to_string();
+        if let Some(ext_name) = &extension_name {
+            prefix.push('_');
+            prefix.push_str(&convert_extension_name(&ext_name));
+        }
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
 
@@ -335,8 +322,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "xidtype" | "xidunion" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name =
-                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
                         types.insert(
                             name,
                             Type {
@@ -347,19 +333,19 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "enum" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name =
-                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
 
                         let mut items = Vec::new();
                         for child in child.children() {
                             if child.is_element() {
                                 if child.tag_name().name() == "item" {
                                     let item_name = child.attribute("name").unwrap();
-                                    let full_item_name = convert_enum_item_name(
-                                        extension_name.as_ref().map(|s| &**s),
-                                        &name,
-                                        item_name,
-                                    );
+                                    let full_item_name = join(&[
+                                        &prefix,
+                                        &convert_name(&name),
+                                        &convert_name(item_name),
+                                    ])
+                                    .to_uppercase();
 
                                     let choice = child.first_element_child().unwrap();
                                     let value = match choice.tag_name().name() {
@@ -385,8 +371,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "typedef" => {
                         let name = child.attribute("newname").unwrap().to_string();
-                        let type_name =
-                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
                         let value = child.attribute("oldname").unwrap().to_string();
                         types.insert(
                             name,
@@ -398,8 +383,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "struct" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name =
-                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -411,8 +395,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "union" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name =
-                            convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
+                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -431,6 +414,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             header_name,
             Module {
                 extension_name,
+                prefix,
                 major_version,
                 minor_version,
                 imports,
@@ -473,9 +457,9 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 .unwrap();
             }
 
-            let ext = convert_extension_name(extension_name);
+            let prefix = &module.prefix;
             writeln!(writer, "    extern \"C\" {{").unwrap();
-            writeln!(writer, "        pub static xcb_{ext}_id: xcb_extension_t;").unwrap();
+            writeln!(writer, "        pub static {prefix}_id: xcb_extension_t;").unwrap();
             writeln!(writer, "    }}").unwrap();
         }
 
