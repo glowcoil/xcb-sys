@@ -338,6 +338,8 @@ pub fn gen(headers: &[&str], out_path: &Path) {
     for (header_name, module) in &ast.modules {
         writeln!(writer, "pub mod {header_name} {{").unwrap();
 
+        writeln!(writer, "    use super::*;").unwrap();
+
         for import in &module.imports {
             writeln!(writer, "    use super::{import}::*;").unwrap();
         }
@@ -360,6 +362,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 )
                 .unwrap();
             }
+
+            let ext = convert_extension_name(extension_name);
+            writeln!(writer, "    extern \"C\" {{").unwrap();
+            writeln!(writer, "        pub static xcb_{ext}_id: xcb_extension_t;").unwrap();
+            writeln!(writer, "    }}").unwrap();
         }
 
         for (_, type_) in &module.types {
