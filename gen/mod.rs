@@ -168,6 +168,7 @@ struct Module {
     minor_version: Option<String>,
     imports: Vec<String>,
     types: BTreeMap<String, Type>,
+    requests: Vec<Request>,
 }
 
 #[derive(Debug)]
@@ -203,6 +204,19 @@ enum FieldType {
 enum LengthExpr {
     Fixed(u32),
     None,
+}
+
+#[derive(Debug)]
+struct Request {
+    name: String,
+    opcode: u32,
+    fields: Vec<Field>,
+    reply: Option<Reply>,
+}
+
+#[derive(Debug)]
+struct Reply {
+    fields: Vec<Field>,
 }
 
 fn parse_fields(node: Node) -> Vec<Field> {
@@ -343,8 +357,10 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             prefix.push('_');
             prefix.push_str(&convert_extension_name(&ext_name));
         }
+
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
+        let mut requests = Vec::new();
 
         for child in root.children() {
             if child.is_element() {
@@ -437,6 +453,29 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             },
                         );
                     }
+                    "request" => {
+                        let name = convert_name(child.attribute("name").unwrap());
+                        let opcode = u32::from_str(child.attribute("opcode").unwrap()).unwrap();
+
+                        let fields = parse_fields(child);
+
+                        let mut reply = None;
+                        for node in child.children() {
+                            if node.is_element() && node.tag_name().name() == "reply" {
+                                let reply_fields = parse_fields(node);
+                                reply = Some(Reply {
+                                    fields: reply_fields,
+                                });
+                            }
+                        }
+
+                        requests.push(Request {
+                            name,
+                            opcode,
+                            fields,
+                            reply,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -451,6 +490,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 minor_version,
                 imports,
                 types,
+                requests,
             },
         );
     }
@@ -544,6 +584,14 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(writer, "    }}").unwrap();
                 }
             }
+        }
+
+        for request in &module.requests {
+            let request_name = join(&[&module.prefix, &request.name]);
+
+            let opcode_name = request_name.to_uppercase();
+            let opcode = request.opcode;
+            writeln!(writer, "    pub const {opcode_name}: u32 = {opcode};").unwrap();
         }
 
         writeln!(writer, "}}").unwrap();
