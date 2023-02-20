@@ -5,7 +5,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::str::FromStr;
 
-use roxmltree::Document;
+use roxmltree::{Document, Node};
 
 fn sanitize(name: &str) -> &str {
     match name {
@@ -206,7 +206,62 @@ enum Kind {
 #[derive(Debug)]
 struct Field {
     name: String,
-    type_: String,
+    type_: FieldType,
+}
+
+#[derive(Debug)]
+enum FieldType {
+    Name(String),
+    Padding(u32),
+}
+
+fn parse_fields(node: Node) -> Vec<Field> {
+    let mut fields = Vec::new();
+
+    let mut pad_index = 0;
+    for child in node.children() {
+        if child.is_element() {
+            match child.tag_name().name() {
+                "field" => {
+                    let field_name = sanitize(child.attribute("name").unwrap()).to_string();
+                    let field_type = child.attribute("type").unwrap().to_string();
+                    fields.push(Field {
+                        name: field_name,
+                        type_: FieldType::Name(field_type),
+                    });
+                }
+                "pad" => {
+                    if let Some(bytes) = child.attribute("bytes") {
+                        let padding = u32::from_str(bytes).unwrap();
+                        fields.push(Field {
+                            name: format!("pad{pad_index}"),
+                            type_: FieldType::Padding(padding),
+                        });
+                        pad_index += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fields
+}
+
+fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[Field]) {
+    for field in fields {
+        let field_name = &field.name;
+        let field_type = match &field.type_ {
+            FieldType::Name(type_name) => ast
+                .lookup(header_name, type_name)
+                .unwrap_or_else(|| panic!("{}", type_name))
+                .to_string(),
+            FieldType::Padding(padding) => {
+                format!("[u8; {padding}]")
+            }
+        };
+        writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
+    }
 }
 
 pub fn gen(headers: &[&str], out_path: &Path) {
@@ -323,23 +378,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         let name = child.attribute("name").unwrap().to_string();
                         let type_name =
                             convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
-
-                        let mut fields = Vec::new();
-                        for child in child.children() {
-                            if child.is_element() {
-                                match child.tag_name().name() {
-                                    "field" => {
-                                        fields.push(Field {
-                                            name: sanitize(child.attribute("name").unwrap())
-                                                .to_string(),
-                                            type_: child.attribute("type").unwrap().to_string(),
-                                        });
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-
+                        let fields = parse_fields(child);
                         types.insert(
                             name,
                             Type {
@@ -352,23 +391,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         let name = child.attribute("name").unwrap().to_string();
                         let type_name =
                             convert_type_name(extension_name.as_ref().map(|s| &**s), &name);
-
-                        let mut fields = Vec::new();
-                        for child in child.children() {
-                            if child.is_element() {
-                                match child.tag_name().name() {
-                                    "field" => {
-                                        fields.push(Field {
-                                            name: sanitize(child.attribute("name").unwrap())
-                                                .to_string(),
-                                            type_: child.attribute("type").unwrap().to_string(),
-                                        });
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-
+                        let fields = parse_fields(child);
                         types.insert(
                             name,
                             Type {
@@ -469,13 +492,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(writer, "    pub struct {type_name} {{").unwrap();
 
-                    for field in fields {
-                        let field_name = &field.name;
-                        let field_type = ast
-                            .lookup(header_name, &field.type_)
-                            .unwrap_or_else(|| panic!("{}", field.type_));
-                        writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
-                    }
+                    gen_fields(&mut writer, header_name, &ast, fields);
 
                     writeln!(writer, "    }}").unwrap();
                 }
@@ -484,13 +501,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(writer, "    pub union {type_name} {{").unwrap();
 
-                    for field in fields {
-                        let field_name = &field.name;
-                        let field_type = ast
-                            .lookup(header_name, &field.type_)
-                            .unwrap_or_else(|| panic!("{}", field.type_));
-                        writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
-                    }
+                    gen_fields(&mut writer, header_name, &ast, fields);
 
                     // Temporary hack since empty unions don't build and we don't handle list fields yet.
                     writeln!(writer, "        _data: (),").unwrap();
