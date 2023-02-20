@@ -196,6 +196,7 @@ enum FieldType {
     Name(String),
     Padding(u32),
     List(String, LengthExpr),
+    Switch,
 }
 
 #[derive(Debug)]
@@ -252,6 +253,13 @@ fn parse_fields(node: Node) -> Vec<Field> {
                         type_: FieldType::List(field_type, length),
                     });
                 }
+                "switch" => {
+                    let field_name = sanitize(child.attribute("name").unwrap()).to_string();
+                    fields.push(Field {
+                        name: field_name,
+                        type_: FieldType::Switch,
+                    });
+                }
                 _ => {}
             }
         }
@@ -282,6 +290,10 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
                     // Only generate fixed-size lists as struct fields
                     continue;
                 }
+            }
+            FieldType::Switch => {
+                // Don't generate struct fields for switches
+                continue;
             }
         };
         writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
