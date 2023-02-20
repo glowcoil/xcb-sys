@@ -213,6 +213,7 @@ struct Field {
 enum FieldType {
     Name(String),
     Padding(u32),
+    List(String, u32),
 }
 
 fn parse_fields(node: Node) -> Vec<Field> {
@@ -240,6 +241,20 @@ fn parse_fields(node: Node) -> Vec<Field> {
                         pad_index += 1;
                     }
                 }
+                "list" => {
+                    if let Some(expr) = child.first_element_child() {
+                        if expr.tag_name().name() == "value" {
+                            let field_name = sanitize(child.attribute("name").unwrap()).to_string();
+                            let field_type = child.attribute("type").unwrap().to_string();
+
+                            let length = u32::from_str(expr.text().unwrap()).unwrap();
+                            fields.push(Field {
+                                name: field_name,
+                                type_: FieldType::List(field_type, length),
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -258,6 +273,13 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
                 .to_string(),
             FieldType::Padding(padding) => {
                 format!("[u8; {padding}]")
+            }
+            FieldType::List(type_name, length) => {
+                let resolved_type = ast
+                    .lookup(header_name, type_name)
+                    .unwrap_or_else(|| panic!("{}", type_name))
+                    .to_string();
+                format!("[{resolved_type}; {length}]")
             }
         };
         writeln!(writer, "        pub {field_name}: {field_type},").unwrap();
@@ -502,9 +524,6 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(writer, "    pub union {type_name} {{").unwrap();
 
                     gen_fields(&mut writer, header_name, &ast, fields);
-
-                    // Temporary hack since empty unions don't build and we don't handle list fields yet.
-                    writeln!(writer, "        _data: (),").unwrap();
 
                     writeln!(writer, "    }}").unwrap();
                 }
