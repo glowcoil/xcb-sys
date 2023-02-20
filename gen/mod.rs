@@ -149,6 +149,8 @@ impl Ast {
 #[derive(Debug)]
 struct Module {
     extension_name: Option<String>,
+    major_version: Option<String>,
+    minor_version: Option<String>,
     imports: Vec<String>,
     types: BTreeMap<String, Type>,
 }
@@ -208,6 +210,9 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
         let header_name = header.to_string();
         let extension_name = root.attribute("extension-name").map(|s| s.to_lowercase());
+        let major_version = root.attribute("major-version").map(|s| s.to_string());
+        let minor_version = root.attribute("minor-version").map(|s| s.to_string());
+
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
 
@@ -309,6 +314,8 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             header_name,
             Module {
                 extension_name,
+                major_version,
+                minor_version,
                 imports,
                 types,
             },
@@ -326,6 +333,26 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
         for import in &module.imports {
             writeln!(writer, "    use super::{import}::*;").unwrap();
+        }
+
+        if let Some(extension_name) = &module.extension_name {
+            let extension_name_uppercase = extension_name.to_uppercase();
+
+            if let Some(major_version) = &module.major_version {
+                writeln!(
+                    writer,
+                    "    pub const XCB_{extension_name_uppercase}_MAJOR_VERSION: u32 = {major_version};"
+                )
+                .unwrap();
+            }
+
+            if let Some(minor_version) = &module.minor_version {
+                writeln!(
+                    writer,
+                    "    pub const XCB_{extension_name_uppercase}_MINOR_VERSION: u32 = {minor_version};"
+                )
+                .unwrap();
+            }
         }
 
         for (_, type_) in &module.types {
