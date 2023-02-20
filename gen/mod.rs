@@ -20,7 +20,7 @@ fn convert_type_name(extension_name: Option<&str>, name: &str) -> String {
     out.push_str("xcb_");
 
     if let Some(extension_name) = extension_name {
-        out.extend(extension_name.chars().flat_map(|c| c.to_lowercase()));
+        out.push_str(&convert_extension_name(extension_name));
         out.push('_');
     }
 
@@ -29,6 +29,13 @@ fn convert_type_name(extension_name: Option<&str>, name: &str) -> String {
     out.push_str("_t");
 
     out
+}
+
+fn convert_extension_name(name: &str) -> String {
+    match name {
+        "XPrint" | "XCMisc" | "BigRequests" => name.to_lowercase(),
+        _ => convert_name(name),
+    }
 }
 
 fn convert_name(name: &str) -> String {
