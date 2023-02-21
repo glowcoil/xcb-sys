@@ -169,6 +169,7 @@ struct Module {
     imports: Vec<String>,
     types: BTreeMap<String, Type>,
     requests: Vec<Request>,
+    events: Vec<Event>,
 }
 
 #[derive(Debug)]
@@ -217,6 +218,13 @@ struct Request {
 
 #[derive(Debug)]
 struct Reply {
+    fields: Vec<Field>,
+}
+
+#[derive(Debug)]
+struct Event {
+    name: String,
+    number: u32,
     fields: Vec<Field>,
 }
 
@@ -364,6 +372,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
         let mut requests = Vec::new();
+        let mut events = Vec::new();
 
         for child in root.children() {
             if child.is_element() {
@@ -479,6 +488,16 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             reply,
                         });
                     }
+                    "event" => {
+                        let name = convert_name(child.attribute("name").unwrap());
+                        let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
+                        let fields = parse_fields(child);
+                        events.push(Event {
+                            name,
+                            number,
+                            fields,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -494,6 +513,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 imports,
                 types,
                 requests,
+                events,
             },
         );
     }
@@ -706,6 +726,29 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 writeln!(writer, "        ) -> *mut {request_name}_reply_t;").unwrap();
             }
 
+            writeln!(writer, "    }}").unwrap();
+        }
+
+        for event in &module.events {
+            let event_name = &event.name;
+
+            let number_name = event_name.to_uppercase();
+            let number = event.number;
+            writeln!(writer, "    pub const {number_name}: u32 = {number};").unwrap();
+
+            writeln!(writer, "    #[repr(C)]").unwrap();
+            writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
+            writeln!(writer, "    pub struct {event_name}_event_t {{").unwrap();
+            writeln!(writer, "        pub response_type: u8,").unwrap();
+            if let Some(first) = event.fields.get(..1) {
+                gen_fields(&mut writer, header_name, &ast, first);
+            } else {
+                writeln!(writer, "        pub pad0: [u8; 1],").unwrap();
+            }
+            writeln!(writer, "        pub sequence: u16,").unwrap();
+            if let Some(rest) = event.fields.get(1..) {
+                gen_fields(&mut writer, header_name, &ast, rest);
+            }
             writeln!(writer, "    }}").unwrap();
         }
 
