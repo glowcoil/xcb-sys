@@ -329,6 +329,27 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
     }
 }
 
+fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) {
+    let type_name = convert_name(name);
+
+    writeln!(w, "    #[repr(C)]").unwrap();
+    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
+    writeln!(w, "    pub struct {prefix}_{type_name}_iterator_t {{").unwrap();
+    writeln!(w, "        pub data: *mut {prefix}_{type_name}_t,").unwrap();
+    writeln!(w, "        pub rem: c_int,").unwrap();
+    writeln!(w, "        pub index: c_int,").unwrap();
+    writeln!(w, "    }}").unwrap();
+
+    writeln!(w, "    extern \"C\" {{").unwrap();
+    writeln!(w, "        pub fn {prefix}_{type_name}_next(").unwrap();
+    writeln!(w, "            i: *mut {prefix}_{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        );").unwrap();
+    writeln!(w, "        pub fn {prefix}_{type_name}_end(").unwrap();
+    writeln!(w, "            i: {prefix}_{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        ) -> xcb_generic_iterator_t;").unwrap();
+    writeln!(w, "    }}").unwrap();
+}
+
 pub fn gen(headers: &[&str], out_path: &Path) {
     let global_types = BTreeMap::from([
         ("CARD8", "u8"),
@@ -569,7 +590,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             }
         }
 
-        for type_ in module.types.values() {
+        for (name, type_) in &module.types {
             let type_name = &type_.name;
 
             match &type_.kind {
@@ -600,6 +621,8 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     gen_fields(&mut writer, header_name, &ast, fields);
 
                     writeln!(writer, "    }}").unwrap();
+
+                    gen_iterator(&mut writer, &module.prefix, name);
                 }
                 Kind::Union { fields } => {
                     writeln!(writer, "    #[repr(C)]").unwrap();
@@ -609,6 +632,8 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     gen_fields(&mut writer, header_name, &ast, fields);
 
                     writeln!(writer, "    }}").unwrap();
+
+                    gen_iterator(&mut writer, &module.prefix, name);
                 }
             }
         }
