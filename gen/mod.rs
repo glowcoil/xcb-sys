@@ -596,7 +596,50 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             let opcode = request.opcode;
             writeln!(writer, "    pub const {opcode_name}: u32 = {opcode};").unwrap();
 
-            if request.reply.is_some() {
+            // Request struct
+            writeln!(writer, "    #[repr(C)]").unwrap();
+            writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
+            writeln!(writer, "    pub struct {request_name}_request_t {{").unwrap();
+
+            if module.extension_name.is_some() {
+                writeln!(writer, "        pub major_opcode: u8,").unwrap();
+                writeln!(writer, "        pub minor_opcode: u8,").unwrap();
+                writeln!(writer, "        pub length: u16,").unwrap();
+                gen_fields(&mut writer, header_name, &ast, &request.fields);
+            } else {
+                writeln!(writer, "        pub major_opcode: u8,").unwrap();
+                if let Some(first) = request.fields.get(..1) {
+                    gen_fields(&mut writer, header_name, &ast, first);
+                } else {
+                    writeln!(writer, "        pub pad0: [u8; 1],").unwrap();
+                }
+                writeln!(writer, "        pub length: u16,").unwrap();
+                if let Some(rest) = request.fields.get(1..) {
+                    gen_fields(&mut writer, header_name, &ast, rest);
+                }
+            }
+
+            writeln!(writer, "    }}").unwrap();
+
+            if let Some(reply) = &request.reply {
+                // Reply struct
+                writeln!(writer, "    #[repr(C)]").unwrap();
+                writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
+                writeln!(writer, "    pub struct {request_name}_reply_t {{").unwrap();
+                writeln!(writer, "        pub response_type: u8,").unwrap();
+                if let Some(first) = reply.fields.get(..1) {
+                    gen_fields(&mut writer, header_name, &ast, first);
+                } else {
+                    writeln!(writer, "        pub pad0: [u8; 1],").unwrap();
+                }
+                writeln!(writer, "        pub sequence: u16,").unwrap();
+                writeln!(writer, "        pub length: u32,").unwrap();
+                if let Some(rest) = reply.fields.get(1..) {
+                    gen_fields(&mut writer, header_name, &ast, rest);
+                }
+                writeln!(writer, "    }}").unwrap();
+
+                // Cookie struct
                 writeln!(writer, "    #[repr(C)]").unwrap();
                 writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
                 writeln!(writer, "    pub struct {request_name}_cookie_t {{").unwrap();
