@@ -307,7 +307,11 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
                 .unwrap_or_else(|| panic!("{}", type_name))
                 .to_string(),
             FieldType::Padding(padding) => {
-                format!("[u8; {padding}]")
+                if *padding == 1 {
+                    "u8".to_string()
+                } else {
+                    format!("[u8; {padding}]")
+                }
             }
             FieldType::List(type_name, LengthExpr::Fixed(length)) => {
                 let resolved_type = ast
