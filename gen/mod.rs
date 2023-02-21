@@ -595,6 +595,67 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             let opcode_name = request_name.to_uppercase();
             let opcode = request.opcode;
             writeln!(writer, "    pub const {opcode_name}: u32 = {opcode};").unwrap();
+
+            if request.reply.is_some() {
+                writeln!(writer, "    #[repr(C)]").unwrap();
+                writeln!(writer, "    #[derive(Copy, Clone)]").unwrap();
+                writeln!(writer, "    pub struct {request_name}_cookie_t {{").unwrap();
+                writeln!(writer, "        pub sequence: c_uint,").unwrap();
+                writeln!(writer, "    }}").unwrap();
+            }
+
+            let mut args = Vec::<u8>::new();
+            writeln!(args, "            c: *mut xcb_connection_t,").unwrap();
+
+            for field in &request.fields {
+                let field_name = &field.name;
+                match &field.type_ {
+                    FieldType::Name(type_name) => {
+                        let field_type = ast
+                            .lookup(header_name, type_name)
+                            .unwrap_or_else(|| panic!("{}", type_name))
+                            .to_string();
+                        writeln!(args, "            {field_name}: {field_type},").unwrap();
+                    }
+                    FieldType::List(type_name, _) => {
+                        let resolved_type = ast
+                            .lookup(header_name, type_name)
+                            .unwrap_or_else(|| panic!("{}", type_name))
+                            .to_string();
+
+                        writeln!(args, "            {field_name}_len: u32,").unwrap();
+                        writeln!(args, "            {field_name}: *const {resolved_type},")
+                            .unwrap();
+                    }
+                    FieldType::Switch => {
+                        writeln!(args, "            {field_name}: *const c_void,").unwrap();
+                    }
+                    FieldType::Fd => {
+                        writeln!(args, "            {field_name}: i32,").unwrap();
+                    }
+                    FieldType::Padding(_) => {
+                        continue;
+                    }
+                };
+            }
+
+            let (cookie_type, checked, unchecked) = if request.reply.is_some() {
+                (&*request_name, "", "_unchecked")
+            } else {
+                ("xcb_void", "_checked", "")
+            };
+
+            writeln!(writer, "    extern \"C\" {{").unwrap();
+
+            writeln!(writer, "        pub fn {request_name}{checked}(").unwrap();
+            writer.write(&args).unwrap();
+            writeln!(writer, "        ) -> {cookie_type}_cookie_t;").unwrap();
+
+            writeln!(writer, "        pub fn {request_name}{unchecked}(").unwrap();
+            writer.write(&args).unwrap();
+            writeln!(writer, "        ) -> {cookie_type}_cookie_t;").unwrap();
+
+            writeln!(writer, "    }}").unwrap();
         }
 
         writeln!(writer, "}}").unwrap();
