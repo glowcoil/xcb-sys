@@ -198,6 +198,7 @@ enum FieldType {
     Padding(u32),
     List(String, LengthExpr),
     Switch,
+    Fd,
 }
 
 #[derive(Debug)]
@@ -274,6 +275,13 @@ fn parse_fields(node: Node) -> Vec<Field> {
                         type_: FieldType::Switch,
                     });
                 }
+                "fd" => {
+                    let field_name = sanitize(child.attribute("name").unwrap()).to_string();
+                    fields.push(Field {
+                        name: field_name,
+                        type_: FieldType::Fd,
+                    });
+                }
                 _ => {}
             }
         }
@@ -293,20 +301,15 @@ fn gen_fields(writer: &mut impl Write, header_name: &str, ast: &Ast, fields: &[F
             FieldType::Padding(padding) => {
                 format!("[u8; {padding}]")
             }
-            FieldType::List(type_name, length_expr) => {
-                if let LengthExpr::Fixed(length) = &length_expr {
-                    let resolved_type = ast
-                        .lookup(header_name, type_name)
-                        .unwrap_or_else(|| panic!("{}", type_name))
-                        .to_string();
-                    format!("[{resolved_type}; {length}]")
-                } else {
-                    // Only generate fixed-size lists as struct fields
-                    continue;
-                }
+            FieldType::List(type_name, LengthExpr::Fixed(length)) => {
+                let resolved_type = ast
+                    .lookup(header_name, type_name)
+                    .unwrap_or_else(|| panic!("{}", type_name))
+                    .to_string();
+                format!("[{resolved_type}; {length}]")
             }
-            FieldType::Switch => {
-                // Don't generate struct fields for switches
+            FieldType::List(_, LengthExpr::None) | FieldType::Switch | FieldType::Fd => {
+                // Don't generate struct fields for variable-length lists, switches, or file descriptors
                 continue;
             }
         };
