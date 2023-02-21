@@ -698,6 +698,14 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             writer.write(&args).unwrap();
             writeln!(writer, "        ) -> {cookie_type}_cookie_t;").unwrap();
 
+            if request.reply.is_some() {
+                writeln!(writer, "        pub fn {request_name}_reply(").unwrap();
+                writeln!(writer, "            c: *mut xcb_connection_t,").unwrap();
+                writeln!(writer, "            cookie: {cookie_type}_cookie_t,").unwrap();
+                writeln!(writer, "            e: *mut *mut xcb_generic_error_t,").unwrap();
+                writeln!(writer, "        ) -> *mut {request_name}_reply_t;").unwrap();
+            }
+
             writeln!(writer, "    }}").unwrap();
         }
 
