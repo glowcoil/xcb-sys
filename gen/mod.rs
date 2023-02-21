@@ -493,11 +493,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         });
                     }
                     "event" => {
-                        let name = convert_name(child.attribute("name").unwrap());
+                        let name = child.attribute("name").unwrap();
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
                         let fields = parse_fields(child);
                         events.push(Event {
-                            name,
+                            name: join(&[&prefix, &convert_name(&name)]),
                             number,
                             fields,
                         });
