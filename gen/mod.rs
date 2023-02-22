@@ -314,18 +314,18 @@ fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) {
 
     writeln!(w, "    #[repr(C)]").unwrap();
     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-    writeln!(w, "    pub struct {prefix}_{type_name}_iterator_t {{").unwrap();
-    writeln!(w, "        pub data: *mut {prefix}_{type_name}_t,").unwrap();
+    writeln!(w, "    pub struct xcb_{prefix}{type_name}_iterator_t {{").unwrap();
+    writeln!(w, "        pub data: *mut xcb_{prefix}{type_name}_t,").unwrap();
     writeln!(w, "        pub rem: c_int,").unwrap();
     writeln!(w, "        pub index: c_int,").unwrap();
     writeln!(w, "    }}").unwrap();
 
     writeln!(w, "    extern \"C\" {{").unwrap();
-    writeln!(w, "        pub fn {prefix}_{type_name}_next(").unwrap();
-    writeln!(w, "            i: *mut {prefix}_{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        pub fn xcb_{prefix}{type_name}_next(").unwrap();
+    writeln!(w, "            i: *mut xcb_{prefix}{type_name}_iterator_t,").unwrap();
     writeln!(w, "        );").unwrap();
-    writeln!(w, "        pub fn {prefix}_{type_name}_end(").unwrap();
-    writeln!(w, "            i: {prefix}_{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        pub fn xcb_{prefix}{type_name}_end(").unwrap();
+    writeln!(w, "            i: xcb_{prefix}{type_name}_iterator_t,").unwrap();
     writeln!(w, "        ) -> xcb_generic_iterator_t;").unwrap();
     writeln!(w, "    }}").unwrap();
 }
@@ -368,11 +368,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let major_version = root.attribute("major-version").map(|s| s.to_string());
         let minor_version = root.attribute("minor-version").map(|s| s.to_string());
 
-        let mut prefix = "xcb".to_string();
-        if let Some(ext_name) = &extension_name {
-            prefix.push('_');
-            prefix.push_str(&convert_extension_name(&ext_name));
-        }
+        let prefix = if let Some(ext_name) = &extension_name {
+            convert_extension_name(&ext_name) + "_"
+        } else {
+            String::new()
+        };
 
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
@@ -387,7 +387,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "xidtype" | "xidunion" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
+                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         types.insert(
                             name,
                             Type {
@@ -398,7 +398,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "enum" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
+                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
 
                         let mut items = Vec::new();
                         for child in child.children() {
@@ -406,8 +406,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                                 if child.tag_name().name() == "item" {
                                     let item_name = child.attribute("name").unwrap();
                                     let full_item_name = format!(
-                                        "{}_{}_{}",
-                                        prefix,
+                                        "xcb_{prefix}{}_{}",
                                         convert_name(&name),
                                         convert_name(item_name)
                                     )
@@ -437,7 +436,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "typedef" => {
                         let name = child.attribute("newname").unwrap().to_string();
-                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
+                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let value = child.attribute("oldname").unwrap().to_string();
                         types.insert(
                             name,
@@ -449,7 +448,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "struct" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
+                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -461,7 +460,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "union" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
+                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -499,7 +498,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
                         let fields = parse_fields(child);
                         events.push(Event {
-                            name: format!("{}_{}", prefix, convert_name(&name)),
+                            name: format!("xcb_{prefix}{}", convert_name(&name)),
                             number,
                             fields,
                         });
@@ -560,7 +559,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
             let prefix = &module.prefix;
             writeln!(writer, "    extern \"C\" {{").unwrap();
-            writeln!(writer, "        pub static {prefix}_id: xcb_extension_t;").unwrap();
+            writeln!(writer, "        pub static xcb_{prefix}id: xcb_extension_t;").unwrap();
             writeln!(writer, "    }}").unwrap();
         }
 
@@ -620,7 +619,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         }
 
         for request in &module.requests {
-            let request_name = format!("{}_{}", module.prefix, request.name);
+            let request_name = format!("xcb_{}{}", module.prefix, request.name);
 
             let opcode_name = request_name.to_uppercase();
             let opcode = request.opcode;
