@@ -108,14 +108,14 @@ struct Ast {
 }
 
 impl Ast {
-    fn lookup(&self, header: &str, type_name: &str) -> Option<String> {
+    fn resolve_type_name(&self, header: &str, type_name: &str) -> String {
         let (module, name) = if let Some(colon) = type_name.find(':') {
             let module_name = &type_name[0..colon];
             let name = &type_name[colon + 1..];
             let module = &self.modules[module_name];
             (Some(module), name)
         } else {
-            (self.find_module(header, type_name), type_name)
+            (self.find_module_for_type(header, type_name), type_name)
         };
 
         if let Some(module) = module {
@@ -125,13 +125,17 @@ impl Ast {
                 String::new()
             };
 
-            return Some(format!("xcb_{prefix}{}_t", convert_name(name)));
+            return format!("xcb_{prefix}{}_t", convert_name(name));
         }
 
-        self.global_types.get(type_name).map(|s| s.to_string())
+        if let Some(name) = self.global_types.get(type_name) {
+            return name.to_string();
+        }
+
+        panic!("couldn't resolve type name {type_name}");
     }
 
-    fn find_module(&self, header: &str, type_name: &str) -> Option<&Module> {
+    fn find_module_for_type(&self, header: &str, type_name: &str) -> Option<&Module> {
         let module = &self.modules[header];
 
         if module.types.contains_key(type_name) {
@@ -139,7 +143,7 @@ impl Ast {
         }
 
         for import in &module.imports {
-            if let Some(result) = self.find_module(import, type_name) {
+            if let Some(result) = self.find_module_for_type(import, type_name) {
                 return Some(result);
             }
         }
@@ -300,10 +304,7 @@ fn gen_fields(w: &mut impl Write, header_name: &str, ast: &Ast, fields: &[Field]
     for field in fields {
         let field_name = &field.name;
         let field_type = match &field.type_ {
-            FieldType::Name(type_name) => ast
-                .lookup(header_name, type_name)
-                .unwrap_or_else(|| panic!("{}", type_name))
-                .to_string(),
+            FieldType::Name(type_name) => ast.resolve_type_name(header_name, type_name),
             FieldType::Padding(padding) => {
                 if *padding == 1 {
                     "u8".to_string()
@@ -312,10 +313,7 @@ fn gen_fields(w: &mut impl Write, header_name: &str, ast: &Ast, fields: &[Field]
                 }
             }
             FieldType::List(type_name, Length::Fixed(length)) => {
-                let resolved_type = ast
-                    .lookup(header_name, type_name)
-                    .unwrap_or_else(|| panic!("{}", type_name))
-                    .to_string();
+                let resolved_type = ast.resolve_type_name(header_name, type_name);
                 format!("[{resolved_type}; {length}]")
             }
             FieldType::List(..) | FieldType::Switch | FieldType::Fd => {
@@ -601,9 +599,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                 }
                 Type::TypeDef { value } => {
-                    let field_type = ast
-                        .lookup(header_name, &value)
-                        .unwrap_or_else(|| panic!("{}", value));
+                    let field_type = ast.resolve_type_name(header_name, value);
                     writeln!(w, "    pub type xcb_{prefix}{name}_t = {field_type};").unwrap();
                     gen_iterator(&mut w, &prefix, &name);
                 }
@@ -746,18 +742,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 let field_name = &field.name;
                 match &field.type_ {
                     FieldType::Name(type_name) => {
-                        let field_type = ast
-                            .lookup(header_name, type_name)
-                            .unwrap_or_else(|| panic!("{}", type_name))
-                            .to_string();
+                        let field_type = ast.resolve_type_name(header_name, type_name);
                         writeln!(args, "            {field_name}: {field_type},").unwrap();
                     }
                     FieldType::List(type_name, length) => {
-                        let resolved_type = ast
-                            .lookup(header_name, type_name)
-                            .unwrap_or_else(|| panic!("{}", type_name))
-                            .to_string();
-
+                        let resolved_type = ast.resolve_type_name(header_name, type_name);
                         if let Length::None = length {
                             writeln!(args, "            {field_name}_len: u32,").unwrap();
                         }
