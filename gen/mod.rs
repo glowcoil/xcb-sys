@@ -7,26 +7,6 @@ use std::str::FromStr;
 
 use roxmltree::{Document, Node};
 
-fn join(pieces: &[&str]) -> String {
-    let mut iter = pieces.iter();
-
-    let first = if let Some(first) = iter.next() {
-        first
-    } else {
-        return String::new();
-    };
-
-    let mut out = String::new();
-    out.push_str(first);
-
-    for piece in iter {
-        out.push('_');
-        out.push_str(piece);
-    }
-
-    out
-}
-
 fn sanitize(name: &str) -> &str {
     match name {
         "type" => "type_",
@@ -407,7 +387,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "xidtype" | "xidunion" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
+                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
                         types.insert(
                             name,
                             Type {
@@ -418,18 +398,19 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "enum" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
+                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
 
                         let mut items = Vec::new();
                         for child in child.children() {
                             if child.is_element() {
                                 if child.tag_name().name() == "item" {
                                     let item_name = child.attribute("name").unwrap();
-                                    let full_item_name = join(&[
-                                        &prefix,
-                                        &convert_name(&name),
-                                        &convert_name(item_name),
-                                    ])
+                                    let full_item_name = format!(
+                                        "{}_{}_{}",
+                                        prefix,
+                                        convert_name(&name),
+                                        convert_name(item_name)
+                                    )
                                     .to_uppercase();
 
                                     let choice = child.first_element_child().unwrap();
@@ -456,7 +437,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "typedef" => {
                         let name = child.attribute("newname").unwrap().to_string();
-                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
+                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
                         let value = child.attribute("oldname").unwrap().to_string();
                         types.insert(
                             name,
@@ -468,7 +449,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "struct" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
+                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -480,7 +461,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "union" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = join(&[&prefix, &convert_name(&name), "t"]);
+                        let type_name = format!("{}_{}_t", prefix, convert_name(&name));
                         let fields = parse_fields(child);
                         types.insert(
                             name,
@@ -518,7 +499,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
                         let fields = parse_fields(child);
                         events.push(Event {
-                            name: join(&[&prefix, &convert_name(&name)]),
+                            name: format!("{}_{}", prefix, convert_name(&name)),
                             number,
                             fields,
                         });
@@ -639,7 +620,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         }
 
         for request in &module.requests {
-            let request_name = join(&[&module.prefix, &request.name]);
+            let request_name = format!("{}_{}", module.prefix, request.name);
 
             let opcode_name = request_name.to_uppercase();
             let opcode = request.opcode;
