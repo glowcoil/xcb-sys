@@ -256,8 +256,14 @@ struct Event {
 
 #[derive(Debug)]
 enum EventInner {
-    Event { xge: bool, fields: Vec<Field> },
-    Copy { ref_: String },
+    Event {
+        xge: bool,
+        sequence: bool,
+        fields: Vec<Field>,
+    },
+    Copy {
+        ref_: String,
+    },
 }
 
 #[derive(Debug)]
@@ -514,11 +520,18 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         let xge = child
                             .attribute("xge")
                             .map_or(false, |x| bool::from_str(x).unwrap());
+                        let sequence = !child
+                            .attribute("no-sequence-number")
+                            .map_or(false, |x| bool::from_str(x).unwrap());
                         let fields = parse_fields(child);
                         events.push(Event {
                             name,
                             number,
-                            inner: EventInner::Event { xge, fields },
+                            inner: EventInner::Event {
+                                xge,
+                                sequence,
+                                fields,
+                            },
                         });
                     }
                     "eventcopy" => {
@@ -877,19 +890,36 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
 
             match &event.inner {
-                EventInner::Event { fields, .. } => {
+                EventInner::Event {
+                    fields,
+                    xge,
+                    sequence,
+                } => {
                     writeln!(w, "    #[repr(C)]").unwrap();
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(w, "    pub struct {event_name}_event_t {{").unwrap();
-                    writeln!(w, "        pub response_type: u8,").unwrap();
-                    if let Some(first) = fields.get(..1) {
-                        gen_fields(&mut w, module, &ast, first);
+                    if *xge {
+                        writeln!(w, "        pub response_type: u8,").unwrap();
+                        writeln!(w, "        pub extension: u8,").unwrap();
+                        writeln!(w, "        pub sequence: u16,").unwrap();
+                        writeln!(w, "        pub length: u32,").unwrap();
+                        writeln!(w, "        pub event_type: u16,").unwrap();
+                        gen_fields(&mut w, module, &ast, fields);
                     } else {
-                        writeln!(w, "        pub pad0: [u8; 1],").unwrap();
-                    }
-                    writeln!(w, "        pub sequence: u16,").unwrap();
-                    if let Some(rest) = fields.get(1..) {
-                        gen_fields(&mut w, module, &ast, rest);
+                        writeln!(w, "        pub response_type: u8,").unwrap();
+                        if *sequence {
+                            if let Some(first) = fields.get(..1) {
+                                gen_fields(&mut w, module, &ast, first);
+                            } else {
+                                writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+                            }
+                            writeln!(w, "        pub sequence: u16,").unwrap();
+                            if let Some(rest) = fields.get(1..) {
+                                gen_fields(&mut w, module, &ast, rest);
+                            }
+                        } else {
+                            gen_fields(&mut w, module, &ast, fields);
+                        }
                     }
                     writeln!(w, "    }}").unwrap();
                 }
