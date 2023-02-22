@@ -365,6 +365,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         ("float", "f32"),
         ("double", "f64"),
         ("void", "std::ffi::c_void"),
+        ("fd", "i32"),
     ]);
 
     let mut modules = BTreeMap::new();
