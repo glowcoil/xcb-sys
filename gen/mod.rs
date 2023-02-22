@@ -205,24 +205,11 @@ struct Module {
 #[derive(Debug)]
 enum Type {
     Id,
-    Enum {
-        items: Vec<(String, u32)>,
-    },
-    TypeDef {
-        value: String,
-    },
-    Struct {
-        fields: Vec<Field>,
-    },
-    Union {
-        fields: Vec<Field>,
-    },
-    EventStruct {
-        extension: String,
-        xge: bool,
-        opcode_min: u32,
-        opcode_max: u32,
-    },
+    Enum { items: Vec<(String, u32)> },
+    TypeDef { value: String },
+    Struct { fields: Vec<Field> },
+    Union { fields: Vec<Field> },
+    EventStruct(EventStruct),
 }
 
 #[derive(Debug)]
@@ -271,6 +258,14 @@ struct Event {
 enum EventInner {
     Event { xge: bool, fields: Vec<Field> },
     Copy { ref_: String },
+}
+
+#[derive(Debug)]
+struct EventStruct {
+    extension: String,
+    xge: bool,
+    opcode_min: u32,
+    opcode_max: u32,
 }
 
 #[derive(Debug)]
@@ -549,12 +544,12 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             u32::from_str(allowed.attribute("opcode-max").unwrap()).unwrap();
                         types.insert(
                             name,
-                            Type::EventStruct {
+                            Type::EventStruct(EventStruct {
                                 extension,
                                 xge,
                                 opcode_min,
                                 opcode_max,
-                            },
+                            }),
                         );
                     }
                     "error" => {
@@ -699,12 +694,12 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(w, "    }}").unwrap();
                     gen_iterator(&mut w, &prefix, &name);
                 }
-                Type::EventStruct {
+                Type::EventStruct(EventStruct {
                     extension,
                     xge,
                     opcode_min,
                     opcode_max,
-                } => {
+                }) => {
                     let mut events = Vec::new();
                     for module in ast.modules.values() {
                         if module.extension_name.as_ref() == Some(&extension) {
