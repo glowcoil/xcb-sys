@@ -530,6 +530,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             match &type_ {
                 Type::Id => {
                     writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;").unwrap();
+                    gen_iterator(&mut w, &prefix, &name);
                 }
                 Type::Enum { items } => {
                     // Some source files contain duplicate xidtype and enum declarations, so don't output an enum type
@@ -552,27 +553,22 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         .lookup(header_name, &value)
                         .unwrap_or_else(|| panic!("{}", value));
                     writeln!(w, "    pub type xcb_{prefix}{name}_t = {field_type};").unwrap();
+                    gen_iterator(&mut w, &prefix, &name);
                 }
                 Type::Struct { fields } => {
                     writeln!(w, "    #[repr(C)]").unwrap();
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(w, "    pub struct xcb_{prefix}{name}_t {{").unwrap();
-
                     gen_fields(&mut w, header_name, &ast, fields);
-
                     writeln!(w, "    }}").unwrap();
-
                     gen_iterator(&mut w, &prefix, &name);
                 }
                 Type::Union { fields } => {
                     writeln!(w, "    #[repr(C)]").unwrap();
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
-
                     gen_fields(&mut w, header_name, &ast, fields);
-
                     writeln!(w, "    }}").unwrap();
-
                     gen_iterator(&mut w, &prefix, &name);
                 }
             }
