@@ -157,6 +157,7 @@ struct Module {
     types: BTreeMap<String, Type>,
     requests: Vec<Request>,
     events: Vec<Event>,
+    event_copies: Vec<EventCopy>,
 }
 
 #[derive(Debug)]
@@ -207,6 +208,13 @@ struct Event {
     name: String,
     number: u32,
     fields: Vec<Field>,
+}
+
+#[derive(Debug)]
+struct EventCopy {
+    name: String,
+    number: u32,
+    ref_: String,
 }
 
 fn parse_fields(node: Node) -> Vec<Field> {
@@ -371,6 +379,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let mut types = BTreeMap::new();
         let mut requests = Vec::new();
         let mut events = Vec::new();
+        let mut event_copies = Vec::new();
 
         for child in root.children() {
             if child.is_element() {
@@ -454,6 +463,12 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             fields,
                         });
                     }
+                    "eventcopy" => {
+                        let name = child.attribute("name").unwrap().to_string();
+                        let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
+                        let ref_ = child.attribute("ref").unwrap().to_string();
+                        event_copies.push(EventCopy { name, number, ref_ });
+                    }
                     _ => {}
                 }
             }
@@ -469,6 +484,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 types,
                 requests,
                 events,
+                event_copies,
             },
         );
     }
@@ -715,6 +731,17 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 gen_fields(&mut w, header_name, &ast, rest);
             }
             writeln!(w, "    }}").unwrap();
+        }
+
+        for event_copy in &module.event_copies {
+            let event_name = format!("xcb_{prefix}{}", convert_name(&event_copy.name));
+            let ref_name = format!("xcb_{prefix}{}_event_t", convert_name(&event_copy.ref_));
+
+            let number_name = event_name.to_uppercase();
+            let number = event_copy.number;
+            writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
+
+            writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
         }
 
         writeln!(w, "}}").unwrap();
