@@ -103,7 +103,7 @@ fn convert_name(name: &str) -> String {
 
 #[derive(Debug)]
 struct Ast {
-    global_types: BTreeMap<&'static str, &'static str>,
+    global_types: BTreeMap<&'static str, Prim>,
     modules: BTreeMap<String, Module>,
 }
 
@@ -128,8 +128,8 @@ impl Ast {
             return format!("xcb_{prefix}{}_t", convert_name(name));
         }
 
-        if let Some(name) = self.global_types.get(type_name) {
-            return name.to_string();
+        if let Some(prim) = self.global_types.get(type_name) {
+            return prim.name.to_string();
         }
 
         panic!("couldn't resolve type name {type_name}");
@@ -188,6 +188,58 @@ impl Ast {
 
         None
     }
+
+    fn get_field_size_align(&self, module: &Module, field: &FieldType) -> (u32, u32) {
+        match field {
+            FieldType::Name(name) => self.get_type_size_align(module, name),
+            FieldType::Padding(bytes) => (*bytes, 0),
+            FieldType::List(elem, length) => match length {
+                Length::Fixed(count) => {
+                    let (size, align) =
+                        self.get_field_size_align(module, &FieldType::Name(elem.clone()));
+                    (size * count, align)
+                }
+                Length::FieldRef | Length::None => (0, 0),
+            },
+            FieldType::Switch => (0, 0),
+            FieldType::Fd => (0, 0),
+        }
+    }
+
+    fn get_type_size_align(&self, module: &Module, name: &str) -> (u32, u32) {
+        if let Some(module) = self.find_module_for_type(module, name) {
+            match &module.types[name] {
+                Type::Id | Type::Enum { .. } => (4, 4),
+                Type::TypeDef { value } => self.get_type_size_align(module, value),
+                Type::Struct { fields } => {
+                    let mut size = 0;
+                    let mut align = 0;
+                    for field in fields {
+                        let (field_size, field_align) =
+                            self.get_field_size_align(module, &field.type_);
+                        size += field_size;
+                        align = align.max(field_align);
+                    }
+                    (size, align)
+                }
+                Type::Union { fields } => {
+                    let mut size = 0;
+                    let mut align = 0;
+                    for field in fields {
+                        let (field_size, field_align) =
+                            self.get_field_size_align(module, &field.type_);
+                        size = size.max(field_size);
+                        align = align.max(field_align);
+                    }
+                    (size, align)
+                }
+                Type::EventStruct(_) => todo!(),
+            }
+        } else {
+            let size = self.global_types[&*name].size;
+            (size, size)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -200,6 +252,12 @@ struct Module {
     requests: Vec<Request>,
     events: Vec<Event>,
     errors: Vec<Error>,
+}
+
+#[derive(Debug)]
+struct Prim {
+    name: &'static str,
+    size: u32,
 }
 
 #[derive(Debug)]
@@ -398,22 +456,23 @@ fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) {
 }
 
 pub fn gen(headers: &[&str], out_path: &Path) {
+    #[rustfmt::skip]
     let global_types = BTreeMap::from([
-        ("CARD8", "u8"),
-        ("CARD16", "u16"),
-        ("CARD32", "u32"),
-        ("CARD64", "u64"),
-        ("INT8", "i8"),
-        ("INT16", "i16"),
-        ("INT32", "i32"),
-        ("INT64", "i64"),
-        ("BYTE", "u8"),
-        ("BOOL", "u8"),
-        ("char", "std::ffi::c_char"),
-        ("float", "f32"),
-        ("double", "f64"),
-        ("void", "std::ffi::c_void"),
-        ("fd", "i32"),
+        ("CARD8", Prim { name: "u8", size: 1 }),
+        ("CARD16", Prim { name: "u16", size: 2 }),
+        ("CARD32", Prim { name: "u32", size: 4 }),
+        ("CARD64", Prim { name: "u64", size: 8 }),
+        ("INT8", Prim { name: "i8", size: 1 }),
+        ("INT16", Prim { name: "i16", size: 2 }),
+        ("INT32", Prim { name: "i32", size: 4 }),
+        ("INT64", Prim { name: "i64", size: 8 }),
+        ("BYTE", Prim { name: "u8", size: 1 }),
+        ("BOOL", Prim { name: "u8", size: 1 }),
+        ("char", Prim { name: "std::ffi::c_char", size: 1 }),
+        ("float", Prim { name: "f32", size: 4 }),
+        ("double", Prim { name: "f64", size: 8 }),
+        ("void", Prim { name: "std::ffi::c_void", size: 0 }),
+        ("fd", Prim { name: "i32", size: 4 }),
     ]);
 
     let mut modules = BTreeMap::new();
@@ -895,7 +954,32 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     xge,
                     sequence,
                 } => {
-                    writeln!(w, "    #[repr(C)]").unwrap();
+                    // Replicating the logic in libxcb's generator script[0] for when to insert the full_sequence field
+                    // and when to ensure a struct has packed layout:
+                    //
+                    // [0]: https://gitlab.freedesktop.org/xorg/lib/libxcb/-/blob/fd04ab24a5e99d53874789439d3ffb0eb82574f7/src/c_client.py#L3246-3261
+                    let mut full_sequence_index = None;
+                    let mut align = 0;
+                    if *xge {
+                        let mut offset = 10; // u8 + u8 + u16 + u32 + u16
+                        for (index, field) in fields.iter().enumerate() {
+                            let (field_size, field_align) =
+                                ast.get_field_size_align(module, &field.type_);
+
+                            offset += field_size;
+                            if offset == 32 && full_sequence_index.is_none() {
+                                full_sequence_index = Some(index + 1);
+                            }
+
+                            align = align.max(field_align);
+                        }
+                    }
+
+                    if full_sequence_index.is_some() && align >= 8 {
+                        writeln!(w, "    #[repr(C, packed)]").unwrap();
+                    } else {
+                        writeln!(w, "    #[repr(C)]").unwrap();
+                    }
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(w, "    pub struct {event_name}_event_t {{").unwrap();
                     if *xge {
@@ -904,7 +988,14 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         writeln!(w, "        pub sequence: u16,").unwrap();
                         writeln!(w, "        pub length: u32,").unwrap();
                         writeln!(w, "        pub event_type: u16,").unwrap();
-                        gen_fields(&mut w, module, &ast, fields);
+                        if let Some(full_sequence_index) = full_sequence_index {
+                            let (before, after) = fields.split_at(full_sequence_index);
+                            gen_fields(&mut w, module, &ast, before);
+                            writeln!(w, "        pub full_sequence: u32,").unwrap();
+                            gen_fields(&mut w, module, &ast, after);
+                        } else {
+                            gen_fields(&mut w, module, &ast, fields);
+                        }
                     } else {
                         writeln!(w, "        pub response_type: u8,").unwrap();
                         if *sequence {
