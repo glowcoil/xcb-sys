@@ -150,6 +150,22 @@ impl Ast {
 
         None
     }
+
+    fn find_module_for_event(&self, header: &str, event_name: &str) -> Option<&Module> {
+        let module = &self.modules[header];
+
+        if module.events.iter().any(|event| event.name == event_name) {
+            return Some(module);
+        }
+
+        for import in &module.imports {
+            if let Some(result) = self.find_module_for_event(import, event_name) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -633,7 +649,9 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                                     EventInner::Event { xge, .. } => *xge,
                                     EventInner::Copy { ref_ } => {
                                         let mut ref_xge = false;
-                                        for event in &module.events {
+                                        let ref_module =
+                                            ast.find_module_for_event(header_name, ref_).unwrap();
+                                        for event in &ref_module.events {
                                             if &event.name == ref_ {
                                                 if let EventInner::Event { xge, .. } = &event.inner
                                                 {
@@ -817,7 +835,13 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(w, "    }}").unwrap();
                 }
                 EventInner::Copy { ref_ } => {
-                    let ref_name = format!("xcb_{prefix}{}_event_t", convert_name(ref_));
+                    let ref_module = ast.find_module_for_event(header_name, ref_).unwrap();
+                    let ref_prefix = if let Some(ext_name) = &ref_module.extension_name {
+                        convert_extension_name(ext_name) + "_"
+                    } else {
+                        String::new()
+                    };
+                    let ref_name = format!("xcb_{ref_prefix}{}_event_t", convert_name(ref_));
                     writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
                 }
             }
