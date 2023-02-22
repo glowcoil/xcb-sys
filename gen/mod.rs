@@ -192,14 +192,15 @@ struct Field {
 enum FieldType {
     Name(String),
     Padding(u32),
-    List(String, LengthExpr),
+    List(String, Length),
     Switch,
     Fd,
 }
 
 #[derive(Debug)]
-enum LengthExpr {
+enum Length {
     Fixed(u32),
+    FieldRef,
     None,
 }
 
@@ -256,17 +257,13 @@ fn parse_fields(node: Node) -> Vec<Field> {
                 }
                 "list" => {
                     let length = if let Some(expr) = child.first_element_child() {
-                        match expr.tag_name().name() {
-                            "value" => {
-                                LengthExpr::Fixed(u32::from_str(expr.text().unwrap()).unwrap())
-                            }
-                            _ => {
-                                // TODO: handle other types of list length expressions
-                                continue;
-                            }
+                        if expr.tag_name().name() == "value" {
+                            Length::Fixed(u32::from_str(expr.text().unwrap()).unwrap())
+                        } else {
+                            Length::FieldRef
                         }
                     } else {
-                        LengthExpr::None
+                        Length::None
                     };
 
                     let field_name = sanitize(child.attribute("name").unwrap()).to_string();
@@ -314,14 +311,14 @@ fn gen_fields(w: &mut impl Write, header_name: &str, ast: &Ast, fields: &[Field]
                     format!("[u8; {padding}]")
                 }
             }
-            FieldType::List(type_name, LengthExpr::Fixed(length)) => {
+            FieldType::List(type_name, Length::Fixed(length)) => {
                 let resolved_type = ast
                     .lookup(header_name, type_name)
                     .unwrap_or_else(|| panic!("{}", type_name))
                     .to_string();
                 format!("[{resolved_type}; {length}]")
             }
-            FieldType::List(_, LengthExpr::None) | FieldType::Switch | FieldType::Fd => {
+            FieldType::List(..) | FieldType::Switch | FieldType::Fd => {
                 // Don't generate struct fields for variable-length lists, switches, or file descriptors
                 continue;
             }
@@ -755,13 +752,15 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             .to_string();
                         writeln!(args, "            {field_name}: {field_type},").unwrap();
                     }
-                    FieldType::List(type_name, _) => {
+                    FieldType::List(type_name, length) => {
                         let resolved_type = ast
                             .lookup(header_name, type_name)
                             .unwrap_or_else(|| panic!("{}", type_name))
                             .to_string();
 
-                        writeln!(args, "            {field_name}_len: u32,").unwrap();
+                        if let Length::None = length {
+                            writeln!(args, "            {field_name}_len: u32,").unwrap();
+                        }
                         writeln!(args, "            {field_name}: *const {resolved_type},")
                             .unwrap();
                     }
