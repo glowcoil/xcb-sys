@@ -108,30 +108,38 @@ struct Ast {
 }
 
 impl Ast {
-    fn lookup(&self, header: &str, type_name: &str) -> Option<&str> {
-        if let Some(colon) = type_name.find(':') {
+    fn lookup(&self, header: &str, type_name: &str) -> Option<String> {
+        let (module, name) = if let Some(colon) = type_name.find(':') {
             let module_name = &type_name[0..colon];
             let name = &type_name[colon + 1..];
-
-            return self.modules[module_name].types.get(name).map(|t| &*t.name);
-        }
-
-        if let Some(result) = self.lookup_inner(header, type_name) {
-            Some(result)
+            let module = &self.modules[module_name];
+            (Some(module), name)
         } else {
-            self.global_types.get(&*type_name).copied()
+            (self.find_module(header, type_name), type_name)
+        };
+
+        if let Some(module) = module {
+            let prefix = if let Some(ext_name) = &module.extension_name {
+                convert_extension_name(ext_name) + "_"
+            } else {
+                String::new()
+            };
+
+            return Some(format!("xcb_{prefix}{}_t", convert_name(name)));
         }
+
+        self.global_types.get(type_name).map(|s| s.to_string())
     }
 
-    fn lookup_inner(&self, header: &str, type_name: &str) -> Option<&str> {
+    fn find_module(&self, header: &str, type_name: &str) -> Option<&Module> {
         let module = &self.modules[header];
 
-        if let Some(type_) = module.types.get(type_name) {
-            return Some(&type_.name);
+        if module.types.contains_key(type_name) {
+            return Some(module);
         }
 
         for import in &module.imports {
-            if let Some(result) = self.lookup_inner(import, type_name) {
+            if let Some(result) = self.find_module(import, type_name) {
                 return Some(result);
             }
         }
@@ -143,7 +151,6 @@ impl Ast {
 #[derive(Debug)]
 struct Module {
     extension_name: Option<String>,
-    prefix: String,
     major_version: Option<String>,
     minor_version: Option<String>,
     imports: Vec<String>,
@@ -153,13 +160,7 @@ struct Module {
 }
 
 #[derive(Debug)]
-struct Type {
-    name: String,
-    kind: Kind,
-}
-
-#[derive(Debug)]
-enum Kind {
+enum Type {
     Id,
     Enum { items: Vec<(String, u32)> },
     TypeDef { value: String },
@@ -310,22 +311,20 @@ fn gen_fields(w: &mut impl Write, header_name: &str, ast: &Ast, fields: &[Field]
 }
 
 fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) {
-    let type_name = convert_name(name);
-
     writeln!(w, "    #[repr(C)]").unwrap();
     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-    writeln!(w, "    pub struct xcb_{prefix}{type_name}_iterator_t {{").unwrap();
-    writeln!(w, "        pub data: *mut xcb_{prefix}{type_name}_t,").unwrap();
+    writeln!(w, "    pub struct xcb_{prefix}{name}_iterator_t {{").unwrap();
+    writeln!(w, "        pub data: *mut xcb_{prefix}{name}_t,").unwrap();
     writeln!(w, "        pub rem: c_int,").unwrap();
     writeln!(w, "        pub index: c_int,").unwrap();
     writeln!(w, "    }}").unwrap();
 
     writeln!(w, "    extern \"C\" {{").unwrap();
-    writeln!(w, "        pub fn xcb_{prefix}{type_name}_next(").unwrap();
-    writeln!(w, "            i: *mut xcb_{prefix}{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        pub fn xcb_{prefix}{name}_next(").unwrap();
+    writeln!(w, "            i: *mut xcb_{prefix}{name}_iterator_t,").unwrap();
     writeln!(w, "        );").unwrap();
-    writeln!(w, "        pub fn xcb_{prefix}{type_name}_end(").unwrap();
-    writeln!(w, "            i: xcb_{prefix}{type_name}_iterator_t,").unwrap();
+    writeln!(w, "        pub fn xcb_{prefix}{name}_end(").unwrap();
+    writeln!(w, "            i: xcb_{prefix}{name}_iterator_t,").unwrap();
     writeln!(w, "        ) -> xcb_generic_iterator_t;").unwrap();
     writeln!(w, "    }}").unwrap();
 }
@@ -368,12 +367,6 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let major_version = root.attribute("major-version").map(|s| s.to_string());
         let minor_version = root.attribute("minor-version").map(|s| s.to_string());
 
-        let prefix = if let Some(ext_name) = &extension_name {
-            convert_extension_name(&ext_name) + "_"
-        } else {
-            String::new()
-        };
-
         let mut imports = Vec::new();
         let mut types = BTreeMap::new();
         let mut requests = Vec::new();
@@ -387,31 +380,16 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     "xidtype" | "xidunion" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
-                        types.insert(
-                            name,
-                            Type {
-                                name: type_name,
-                                kind: Kind::Id,
-                            },
-                        );
+                        types.insert(name, Type::Id);
                     }
                     "enum" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
 
                         let mut items = Vec::new();
                         for child in child.children() {
                             if child.is_element() {
                                 if child.tag_name().name() == "item" {
-                                    let item_name = child.attribute("name").unwrap();
-                                    let full_item_name = format!(
-                                        "xcb_{prefix}{}_{}",
-                                        convert_name(&name),
-                                        convert_name(item_name)
-                                    )
-                                    .to_uppercase();
-
+                                    let item_name = child.attribute("name").unwrap().to_string();
                                     let choice = child.first_element_child().unwrap();
                                     let value = match choice.tag_name().name() {
                                         "value" => u32::from_str(choice.text().unwrap()).unwrap(),
@@ -421,57 +399,30 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                                         _ => panic!(),
                                     };
 
-                                    items.push((full_item_name, value));
+                                    items.push((item_name, value));
                                 }
                             }
                         }
 
-                        types.insert(
-                            name,
-                            Type {
-                                name: type_name,
-                                kind: Kind::Enum { items },
-                            },
-                        );
+                        types.insert(name, Type::Enum { items });
                     }
                     "typedef" => {
                         let name = child.attribute("newname").unwrap().to_string();
-                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let value = child.attribute("oldname").unwrap().to_string();
-                        types.insert(
-                            name,
-                            Type {
-                                name: type_name,
-                                kind: Kind::TypeDef { value },
-                            },
-                        );
+                        types.insert(name, Type::TypeDef { value });
                     }
                     "struct" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let fields = parse_fields(child);
-                        types.insert(
-                            name,
-                            Type {
-                                name: type_name,
-                                kind: Kind::Struct { fields },
-                            },
-                        );
+                        types.insert(name, Type::Struct { fields });
                     }
                     "union" => {
                         let name = child.attribute("name").unwrap().to_string();
-                        let type_name = format!("xcb_{prefix}{}_t", convert_name(&name));
                         let fields = parse_fields(child);
-                        types.insert(
-                            name,
-                            Type {
-                                name: type_name,
-                                kind: Kind::Union { fields },
-                            },
-                        );
+                        types.insert(name, Type::Union { fields });
                     }
                     "request" => {
-                        let name = convert_name(child.attribute("name").unwrap());
+                        let name = child.attribute("name").unwrap().to_string();
                         let opcode = u32::from_str(child.attribute("opcode").unwrap()).unwrap();
 
                         let fields = parse_fields(child);
@@ -494,11 +445,11 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         });
                     }
                     "event" => {
-                        let name = child.attribute("name").unwrap();
+                        let name = child.attribute("name").unwrap().to_string();
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
                         let fields = parse_fields(child);
                         events.push(Event {
-                            name: format!("xcb_{prefix}{}", convert_name(&name)),
+                            name,
                             number,
                             fields,
                         });
@@ -512,7 +463,6 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             header_name,
             Module {
                 extension_name,
-                prefix,
                 major_version,
                 minor_version,
                 imports,
@@ -530,6 +480,12 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
     let mut w = BufWriter::new(File::create(out_path).unwrap());
     for (header_name, module) in &ast.modules {
+        let prefix = if let Some(ext_name) = &module.extension_name {
+            convert_extension_name(ext_name) + "_"
+        } else {
+            String::new()
+        };
+
         writeln!(w, "pub mod {header_name} {{").unwrap();
 
         writeln!(w, "    use super::*;").unwrap();
@@ -557,69 +513,73 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 .unwrap();
             }
 
-            let prefix = &module.prefix;
             writeln!(w, "    extern \"C\" {{").unwrap();
             writeln!(w, "        pub static xcb_{prefix}id: xcb_extension_t;").unwrap();
             writeln!(w, "    }}").unwrap();
         }
 
         let mut id_names = BTreeSet::new();
-        for type_ in module.types.values() {
-            if let Kind::Id = &type_.kind {
-                id_names.insert(&type_.name);
+        for (name, type_) in &module.types {
+            if let Type::Id = &type_ {
+                id_names.insert(convert_name(name));
             }
         }
 
-        for (name, type_) in &module.types {
-            let type_name = &type_.name;
-
-            match &type_.kind {
-                Kind::Id => {
-                    writeln!(w, "    pub type {type_name} = u32;").unwrap();
+        for (type_name, type_) in &module.types {
+            let name = convert_name(type_name);
+            match &type_ {
+                Type::Id => {
+                    writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;").unwrap();
                 }
-                Kind::Enum { items } => {
+                Type::Enum { items } => {
                     // Some source files contain duplicate xidtype and enum declarations, so don't output an enum type
                     // alias if there's already one from the xidtype.
-                    if !id_names.contains(type_name) {
-                        writeln!(w, "    pub type {type_name} = u32;").unwrap();
+                    if !id_names.contains(&name) {
+                        writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;").unwrap();
                     }
-                    for (name, value) in items {
-                        writeln!(w, "    pub const {name}: {type_name} = {value};").unwrap();
+                    for (item_name, value) in items {
+                        let const_name = format!("xcb_{prefix}{name}_{}", convert_name(item_name))
+                            .to_uppercase();
+                        writeln!(
+                            w,
+                            "    pub const {const_name}: xcb_{prefix}{name}_t = {value};"
+                        )
+                        .unwrap();
                     }
                 }
-                Kind::TypeDef { value } => {
+                Type::TypeDef { value } => {
                     let field_type = ast
                         .lookup(header_name, &value)
                         .unwrap_or_else(|| panic!("{}", value));
-                    writeln!(w, "    pub type {type_name} = {field_type};").unwrap();
+                    writeln!(w, "    pub type xcb_{prefix}{name}_t = {field_type};").unwrap();
                 }
-                Kind::Struct { fields } => {
+                Type::Struct { fields } => {
                     writeln!(w, "    #[repr(C)]").unwrap();
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub struct {type_name} {{").unwrap();
+                    writeln!(w, "    pub struct xcb_{prefix}{name}_t {{").unwrap();
 
                     gen_fields(&mut w, header_name, &ast, fields);
 
                     writeln!(w, "    }}").unwrap();
 
-                    gen_iterator(&mut w, &module.prefix, name);
+                    gen_iterator(&mut w, &prefix, &name);
                 }
-                Kind::Union { fields } => {
+                Type::Union { fields } => {
                     writeln!(w, "    #[repr(C)]").unwrap();
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub union {type_name} {{").unwrap();
+                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
 
                     gen_fields(&mut w, header_name, &ast, fields);
 
                     writeln!(w, "    }}").unwrap();
 
-                    gen_iterator(&mut w, &module.prefix, name);
+                    gen_iterator(&mut w, &prefix, &name);
                 }
             }
         }
 
         for request in &module.requests {
-            let request_name = format!("xcb_{}{}", module.prefix, request.name);
+            let request_name = format!("xcb_{prefix}{}", convert_name(&request.name));
 
             let opcode_name = request_name.to_uppercase();
             let opcode = request.opcode;
@@ -739,7 +699,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         }
 
         for event in &module.events {
-            let event_name = &event.name;
+            let event_name = format!("xcb_{prefix}{}", convert_name(&event.name));
 
             let number_name = event_name.to_uppercase();
             let number = event.number;
