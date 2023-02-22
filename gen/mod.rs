@@ -157,16 +157,29 @@ struct Module {
     types: BTreeMap<String, Type>,
     requests: Vec<Request>,
     events: Vec<Event>,
-    event_copies: Vec<EventCopy>,
 }
 
 #[derive(Debug)]
 enum Type {
     Id,
-    Enum { items: Vec<(String, u32)> },
-    TypeDef { value: String },
-    Struct { fields: Vec<Field> },
-    Union { fields: Vec<Field> },
+    Enum {
+        items: Vec<(String, u32)>,
+    },
+    TypeDef {
+        value: String,
+    },
+    Struct {
+        fields: Vec<Field>,
+    },
+    Union {
+        fields: Vec<Field>,
+    },
+    EventStruct {
+        extension: String,
+        xge: bool,
+        opcode_min: u32,
+        opcode_max: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -207,14 +220,13 @@ struct Reply {
 struct Event {
     name: String,
     number: u32,
-    fields: Vec<Field>,
+    inner: EventInner,
 }
 
 #[derive(Debug)]
-struct EventCopy {
-    name: String,
-    number: u32,
-    ref_: String,
+enum EventInner {
+    Event { xge: bool, fields: Vec<Field> },
+    Copy { ref_: String },
 }
 
 fn parse_fields(node: Node) -> Vec<Field> {
@@ -379,7 +391,6 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let mut types = BTreeMap::new();
         let mut requests = Vec::new();
         let mut events = Vec::new();
-        let mut event_copies = Vec::new();
 
         for child in root.children() {
             if child.is_element() {
@@ -456,18 +467,46 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     "event" => {
                         let name = child.attribute("name").unwrap().to_string();
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
+                        let xge = child
+                            .attribute("xge")
+                            .map_or(false, |x| bool::from_str(x).unwrap());
                         let fields = parse_fields(child);
                         events.push(Event {
                             name,
                             number,
-                            fields,
+                            inner: EventInner::Event { xge, fields },
                         });
                     }
                     "eventcopy" => {
                         let name = child.attribute("name").unwrap().to_string();
                         let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
                         let ref_ = child.attribute("ref").unwrap().to_string();
-                        event_copies.push(EventCopy { name, number, ref_ });
+                        events.push(Event {
+                            name,
+                            number,
+                            inner: EventInner::Copy { ref_ },
+                        });
+                    }
+                    "eventstruct" => {
+                        let name = child.attribute("name").unwrap().to_string();
+                        let allowed = child.first_element_child().unwrap();
+                        let extension = allowed.attribute("extension").unwrap().to_string();
+                        let xge = child
+                            .attribute("xge")
+                            .map_or(false, |x| bool::from_str(x).unwrap());
+                        let opcode_min =
+                            u32::from_str(allowed.attribute("opcode-min").unwrap()).unwrap();
+                        let opcode_max =
+                            u32::from_str(allowed.attribute("opcode-max").unwrap()).unwrap();
+                        types.insert(
+                            name,
+                            Type::EventStruct {
+                                extension,
+                                xge,
+                                opcode_min,
+                                opcode_max,
+                            },
+                        );
                     }
                     _ => {}
                 }
@@ -484,7 +523,6 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 types,
                 requests,
                 events,
-                event_copies,
             },
         );
     }
@@ -584,6 +622,61 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
                     writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
                     gen_fields(&mut w, header_name, &ast, fields);
+                    writeln!(w, "    }}").unwrap();
+                    gen_iterator(&mut w, &prefix, &name);
+                }
+                Type::EventStruct {
+                    extension,
+                    xge,
+                    opcode_min,
+                    opcode_max,
+                } => {
+                    let mut events = Vec::new();
+                    for module in ast.modules.values() {
+                        if module.extension_name.as_ref() == Some(&extension) {
+                            for event in &module.events {
+                                let event_xge = match &event.inner {
+                                    EventInner::Event { xge, .. } => *xge,
+                                    EventInner::Copy { ref_ } => {
+                                        let mut ref_xge = false;
+                                        for event in &module.events {
+                                            if &event.name == ref_ {
+                                                if let EventInner::Event { xge, .. } = &event.inner
+                                                {
+                                                    ref_xge = *xge;
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        ref_xge
+                                    }
+                                };
+
+                                if event_xge == *xge
+                                    && event.number >= *opcode_min
+                                    && event.number < *opcode_max
+                                {
+                                    events.push(event);
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                    events.sort_by_key(|e| e.number);
+
+                    writeln!(w, "    #[repr(C)]").unwrap();
+                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
+                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
+                    for event in &events {
+                        let event_name = convert_name(&event.name);
+                        writeln!(
+                            w,
+                            "        pub {event_name}: xcb_{prefix}{event_name}_event_t,"
+                        )
+                        .unwrap();
+                    }
+                    writeln!(w, "        pub event_header: xcb_raw_generic_event_t,").unwrap();
                     writeln!(w, "    }}").unwrap();
                     gen_iterator(&mut w, &prefix, &name);
                 }
@@ -717,31 +810,28 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             let number = event.number;
             writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
 
-            writeln!(w, "    #[repr(C)]").unwrap();
-            writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-            writeln!(w, "    pub struct {event_name}_event_t {{").unwrap();
-            writeln!(w, "        pub response_type: u8,").unwrap();
-            if let Some(first) = event.fields.get(..1) {
-                gen_fields(&mut w, header_name, &ast, first);
-            } else {
-                writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+            match &event.inner {
+                EventInner::Event { fields, .. } => {
+                    writeln!(w, "    #[repr(C)]").unwrap();
+                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
+                    writeln!(w, "    pub struct {event_name}_event_t {{").unwrap();
+                    writeln!(w, "        pub response_type: u8,").unwrap();
+                    if let Some(first) = fields.get(..1) {
+                        gen_fields(&mut w, header_name, &ast, first);
+                    } else {
+                        writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+                    }
+                    writeln!(w, "        pub sequence: u16,").unwrap();
+                    if let Some(rest) = fields.get(1..) {
+                        gen_fields(&mut w, header_name, &ast, rest);
+                    }
+                    writeln!(w, "    }}").unwrap();
+                }
+                EventInner::Copy { ref_ } => {
+                    let ref_name = format!("xcb_{prefix}{}_event_t", convert_name(ref_));
+                    writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
+                }
             }
-            writeln!(w, "        pub sequence: u16,").unwrap();
-            if let Some(rest) = event.fields.get(1..) {
-                gen_fields(&mut w, header_name, &ast, rest);
-            }
-            writeln!(w, "    }}").unwrap();
-        }
-
-        for event_copy in &module.event_copies {
-            let event_name = format!("xcb_{prefix}{}", convert_name(&event_copy.name));
-            let ref_name = format!("xcb_{prefix}{}_event_t", convert_name(&event_copy.ref_));
-
-            let number_name = event_name.to_uppercase();
-            let number = event_copy.number;
-            writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
-
-            writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
         }
 
         writeln!(w, "}}").unwrap();
