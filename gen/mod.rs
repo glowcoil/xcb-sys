@@ -166,6 +166,22 @@ impl Ast {
 
         None
     }
+
+    fn find_module_for_error(&self, header: &str, error_name: &str) -> Option<&Module> {
+        let module = &self.modules[header];
+
+        if module.errors.iter().any(|error| error.name == error_name) {
+            return Some(module);
+        }
+
+        for import in &module.imports {
+            if let Some(result) = self.find_module_for_error(import, error_name) {
+                return Some(result);
+            }
+        }
+
+        None
+    }
 }
 
 #[derive(Debug)]
@@ -177,6 +193,7 @@ struct Module {
     types: BTreeMap<String, Type>,
     requests: Vec<Request>,
     events: Vec<Event>,
+    errors: Vec<Error>,
 }
 
 #[derive(Debug)]
@@ -247,6 +264,19 @@ struct Event {
 #[derive(Debug)]
 enum EventInner {
     Event { xge: bool, fields: Vec<Field> },
+    Copy { ref_: String },
+}
+
+#[derive(Debug)]
+struct Error {
+    name: String,
+    number: u32,
+    inner: ErrorInner,
+}
+
+#[derive(Debug)]
+enum ErrorInner {
+    Error { fields: Vec<Field> },
     Copy { ref_: String },
 }
 
@@ -403,6 +433,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let mut types = BTreeMap::new();
         let mut requests = Vec::new();
         let mut events = Vec::new();
+        let mut errors = Vec::new();
 
         for child in root.children() {
             if child.is_element() {
@@ -520,6 +551,32 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                             },
                         );
                     }
+                    "error" => {
+                        let name = child.attribute("name").unwrap().to_string();
+                        let number_str = child.attribute("number").unwrap();
+                        // XCB_GLX_GENERIC is -1
+                        let number = if number_str == "-1" {
+                            u8::MAX as u32
+                        } else {
+                            u32::from_str(number_str).unwrap()
+                        };
+                        let fields = parse_fields(child);
+                        errors.push(Error {
+                            name,
+                            number,
+                            inner: ErrorInner::Error { fields },
+                        });
+                    }
+                    "errorcopy" => {
+                        let name = child.attribute("name").unwrap().to_string();
+                        let number = u32::from_str(child.attribute("number").unwrap()).unwrap();
+                        let ref_ = child.attribute("ref").unwrap().to_string();
+                        errors.push(Error {
+                            name,
+                            number,
+                            inner: ErrorInner::Copy { ref_ },
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -535,6 +592,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 types,
                 requests,
                 events,
+                errors,
             },
         );
     }
@@ -843,6 +901,46 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     };
                     let ref_name = format!("xcb_{ref_prefix}{}_event_t", convert_name(ref_));
                     writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
+                }
+            }
+        }
+
+        for error in &module.errors {
+            let error_name = format!("xcb_{prefix}{}", convert_name(&error.name));
+
+            let number_name = error_name.to_uppercase();
+            let number = error.number;
+            writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
+
+            match &error.inner {
+                ErrorInner::Error { fields } => {
+                    writeln!(w, "    #[repr(C)]").unwrap();
+                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
+                    writeln!(w, "    pub struct {error_name}_error_t {{").unwrap();
+                    writeln!(w, "        pub response_type: u8,").unwrap();
+                    writeln!(w, "        pub error_code: u8,").unwrap();
+                    writeln!(w, "        pub sequence: u16,").unwrap();
+                    if fields.len() < 1 {
+                        writeln!(w, "        pub bad_value: u32,").unwrap();
+                    }
+                    if fields.len() < 2 {
+                        writeln!(w, "        pub minor_opcode: u16,").unwrap();
+                    }
+                    if fields.len() < 3 {
+                        writeln!(w, "        pub major_opcode: u8,").unwrap();
+                    }
+                    gen_fields(&mut w, header_name, &ast, fields);
+                    writeln!(w, "    }}").unwrap();
+                }
+                ErrorInner::Copy { ref_ } => {
+                    let ref_module = ast.find_module_for_error(header_name, ref_).unwrap();
+                    let ref_prefix = if let Some(ext_name) = &ref_module.extension_name {
+                        convert_extension_name(ext_name) + "_"
+                    } else {
+                        String::new()
+                    };
+                    let ref_name = format!("xcb_{ref_prefix}{}_error_t", convert_name(ref_));
+                    writeln!(w, "    pub type {error_name}_error_t = {ref_name};").unwrap();
                 }
             }
         }
