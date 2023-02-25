@@ -126,7 +126,31 @@ pub struct xcb_special_event_t {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct xcb_extension_t {
-    _data: [u8; 0],
+    pub name: *const c_char,
+    pub global_id: c_int,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct xcb_protocol_request_t {
+    pub count: usize,
+    pub ext: *mut xcb_extension_t,
+    pub opcode: u8,
+    pub isvoid: u8,
+}
+
+pub type xcb_send_request_flags_t = u32;
+
+pub const XCB_REQUEST_CHECKED: xcb_send_request_flags_t = 1 << 0;
+pub const XCB_REQUEST_RAW: xcb_send_request_flags_t = 1 << 1;
+pub const XCB_REQUEST_DISCARD_REPLY: xcb_send_request_flags_t = 1 << 2;
+pub const XCB_REQUEST_REPLY_FDS: xcb_send_request_flags_t = 1 << 3;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct iovec {
+    iov_base: *mut c_void,
+    iov_len: usize,
 }
 
 extern "C" {
@@ -180,4 +204,75 @@ extern "C" {
         screen: *mut c_int,
     ) -> *mut xcb_connection_t;
     pub fn xcb_generate_id(c: *mut xcb_connection_t) -> u32;
+    pub fn xcb_send_request(
+        c: *mut xcb_connection_t,
+        flags: c_int,
+        vector: *mut iovec,
+        request: *const xcb_protocol_request_t,
+    ) -> c_uint;
+    pub fn xcb_send_request_with_fds(
+        c: *mut xcb_connection_t,
+        flags: c_int,
+        vector: *mut iovec,
+        request: *const xcb_protocol_request_t,
+        num_fds: c_uint,
+        fds: *mut c_int,
+    ) -> c_uint;
+    pub fn xcb_send_request64(
+        c: *mut xcb_connection_t,
+        flags: c_int,
+        vector: *mut iovec,
+        request: *const xcb_protocol_request_t,
+    ) -> u64;
+    pub fn xcb_send_request_with_fds64(
+        c: *mut xcb_connection_t,
+        flags: c_int,
+        vector: *mut iovec,
+        request: *const xcb_protocol_request_t,
+        num_fds: c_uint,
+        fds: *mut c_int,
+    ) -> u64;
+    pub fn xcb_send_fd(c: *mut xcb_connection_t, fd: c_int) -> c_void;
+    pub fn xcb_take_socket(
+        c: *mut xcb_connection_t,
+        return_socket: extern "C" fn(closure: *mut c_void),
+        closure: *mut c_void,
+        flags: c_int,
+        sent: *mut u64,
+    ) -> c_int;
+    pub fn xcb_writev(
+        c: *mut xcb_connection_t,
+        vector: *mut iovec,
+        count: c_int,
+        requests: u64,
+    ) -> c_int;
+    pub fn xcb_wait_for_reply(
+        c: *mut xcb_connection_t,
+        request: c_uint,
+        e: *mut *mut xcb_generic_error_t,
+    ) -> *mut c_void;
+    pub fn xcb_wait_for_reply64(
+        c: *mut xcb_connection_t,
+        request: u64,
+        e: *mut *mut xcb_generic_error_t,
+    ) -> *mut c_void;
+    pub fn xcb_poll_for_reply(
+        c: *mut xcb_connection_t,
+        request: c_uint,
+        reply: *mut *mut c_void,
+        error: *mut *mut xcb_generic_error_t,
+    ) -> c_int;
+    pub fn xcb_poll_for_reply64(
+        c: *mut xcb_connection_t,
+        request: u64,
+        reply: *mut *mut c_void,
+        error: *mut *mut xcb_generic_error_t,
+    ) -> c_int;
+    pub fn xcb_get_reply_fds(
+        c: *mut xcb_connection_t,
+        reply: *mut c_void,
+        replylen: usize,
+    ) -> *mut c_int;
+    pub fn xcb_popcount(mask: u32) -> c_int;
+    pub fn xcb_sumof(list: *mut u8, len: c_int) -> c_int;
 }
