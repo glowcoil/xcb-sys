@@ -5,6 +5,8 @@
 
 use std::ffi::{c_char, c_int, c_uint, c_void};
 
+use xproto::*;
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 pub const X_PROTOCOL: u32 = 11;
@@ -25,18 +27,6 @@ pub const XCB_NO_SYMBOL: u32 = 0;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct xcb_connection_t {
-    _data: [u8; 0],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct xcb_query_extension_reply_t {
-    _data: [u8; 0],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct xcb_setup_t {
     _data: [u8; 0],
 }
 
