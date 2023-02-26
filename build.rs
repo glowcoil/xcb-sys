@@ -69,7 +69,7 @@ fn main() {
 
     let mut out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     out_path.push("bindings.rs");
-    gen::gen(&sources[..], &out_path);
+    gen::gen(&sources[..], &out_path).unwrap();
 
     println!("cargo:rustc-link-lib=xcb");
 

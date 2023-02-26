@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::str::FromStr;
+use std::{error, fs};
 
 use roxmltree::{Document, Node};
 
@@ -411,7 +411,12 @@ fn parse_fields(node: Node) -> Vec<Field> {
     fields
 }
 
-fn gen_fields(w: &mut impl Write, module: &Module, ast: &Ast, fields: &[Field]) {
+fn gen_fields(
+    w: &mut impl Write,
+    module: &Module,
+    ast: &Ast,
+    fields: &[Field],
+) -> Result<(), Box<dyn error::Error>> {
     for field in fields {
         let field_name = &field.name;
         let field_type = match &field.type_ {
@@ -432,30 +437,34 @@ fn gen_fields(w: &mut impl Write, module: &Module, ast: &Ast, fields: &[Field]) 
                 continue;
             }
         };
-        writeln!(w, "        pub {field_name}: {field_type},").unwrap();
+        writeln!(w, "        pub {field_name}: {field_type},")?;
     }
+
+    Ok(())
 }
 
-fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) {
-    writeln!(w, "    #[repr(C)]").unwrap();
-    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-    writeln!(w, "    pub struct xcb_{prefix}{name}_iterator_t {{").unwrap();
-    writeln!(w, "        pub data: *mut xcb_{prefix}{name}_t,").unwrap();
-    writeln!(w, "        pub rem: c_int,").unwrap();
-    writeln!(w, "        pub index: c_int,").unwrap();
-    writeln!(w, "    }}").unwrap();
+fn gen_iterator(w: &mut impl Write, prefix: &str, name: &str) -> Result<(), Box<dyn error::Error>> {
+    writeln!(w, "    #[repr(C)]")?;
+    writeln!(w, "    #[derive(Copy, Clone)]")?;
+    writeln!(w, "    pub struct xcb_{prefix}{name}_iterator_t {{")?;
+    writeln!(w, "        pub data: *mut xcb_{prefix}{name}_t,")?;
+    writeln!(w, "        pub rem: c_int,")?;
+    writeln!(w, "        pub index: c_int,")?;
+    writeln!(w, "    }}")?;
 
-    writeln!(w, "    extern \"C\" {{").unwrap();
-    writeln!(w, "        pub fn xcb_{prefix}{name}_next(").unwrap();
-    writeln!(w, "            i: *mut xcb_{prefix}{name}_iterator_t,").unwrap();
-    writeln!(w, "        );").unwrap();
-    writeln!(w, "        pub fn xcb_{prefix}{name}_end(").unwrap();
-    writeln!(w, "            i: xcb_{prefix}{name}_iterator_t,").unwrap();
-    writeln!(w, "        ) -> xcb_generic_iterator_t;").unwrap();
-    writeln!(w, "    }}").unwrap();
+    writeln!(w, "    extern \"C\" {{")?;
+    writeln!(w, "        pub fn xcb_{prefix}{name}_next(")?;
+    writeln!(w, "            i: *mut xcb_{prefix}{name}_iterator_t,")?;
+    writeln!(w, "        );")?;
+    writeln!(w, "        pub fn xcb_{prefix}{name}_end(")?;
+    writeln!(w, "            i: xcb_{prefix}{name}_iterator_t,")?;
+    writeln!(w, "        ) -> xcb_generic_iterator_t;")?;
+    writeln!(w, "    }}")?;
+
+    Ok(())
 }
 
-pub fn gen(headers: &[&str], out_path: &Path) {
+pub fn gen(headers: &[&str], out_path: &Path) -> Result<(), Box<dyn error::Error>> {
     #[rustfmt::skip]
     let global_types = BTreeMap::from([
         ("CARD8", Prim { name: "u8", size: 1 }),
@@ -481,7 +490,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         let mut path = Path::new("xml").join(header);
         path.set_extension("xml");
 
-        let bytes = fs::read(path).unwrap();
+        let bytes = fs::read(path)?;
         let text = std::str::from_utf8(&bytes).unwrap();
         let tree = Document::parse(text).unwrap();
         let root = tree.root_element();
@@ -675,7 +684,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
         modules,
     };
 
-    let mut w = BufWriter::new(File::create(out_path).unwrap());
+    let mut w = BufWriter::new(File::create(out_path)?);
     for (header_name, module) in &ast.modules {
         let prefix = if let Some(ext_name) = &module.extension_name {
             convert_extension_name(ext_name) + "_"
@@ -683,12 +692,12 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             String::new()
         };
 
-        writeln!(w, "pub mod {header_name} {{").unwrap();
+        writeln!(w, "pub mod {header_name} {{")?;
 
-        writeln!(w, "    use super::*;").unwrap();
+        writeln!(w, "    use super::*;")?;
 
         for import in &module.imports {
-            writeln!(w, "    use super::{import}::*;").unwrap();
+            writeln!(w, "    use super::{import}::*;")?;
         }
 
         if let Some(extension_name) = &module.extension_name {
@@ -698,21 +707,19 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 writeln!(
                     w,
                     "    pub const XCB_{extension_name_uppercase}_MAJOR_VERSION: u32 = {major_version};"
-                )
-                .unwrap();
+                )?;
             }
 
             if let Some(minor_version) = &module.minor_version {
                 writeln!(
                     w,
                     "    pub const XCB_{extension_name_uppercase}_MINOR_VERSION: u32 = {minor_version};"
-                )
-                .unwrap();
+                )?;
             }
 
-            writeln!(w, "    extern \"C\" {{").unwrap();
-            writeln!(w, "        pub static xcb_{prefix}id: xcb_extension_t;").unwrap();
-            writeln!(w, "    }}").unwrap();
+            writeln!(w, "    extern \"C\" {{")?;
+            writeln!(w, "        pub static xcb_{prefix}id: xcb_extension_t;")?;
+            writeln!(w, "    }}")?;
         }
 
         let mut id_names = BTreeSet::new();
@@ -726,14 +733,14 @@ pub fn gen(headers: &[&str], out_path: &Path) {
             let name = convert_name(type_name);
             match &type_ {
                 Type::Id => {
-                    writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;").unwrap();
-                    gen_iterator(&mut w, &prefix, &name);
+                    writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;")?;
+                    gen_iterator(&mut w, &prefix, &name)?;
                 }
                 Type::Enum { items } => {
                     // Some source files contain duplicate xidtype and enum declarations, so don't output an enum type
                     // alias if there's already one from the xidtype.
                     if !id_names.contains(&name) {
-                        writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;").unwrap();
+                        writeln!(w, "    pub type xcb_{prefix}{name}_t = u32;")?;
                     }
                     for (item_name, value) in items {
                         let const_name = format!("xcb_{prefix}{name}_{}", convert_name(item_name))
@@ -741,30 +748,29 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         writeln!(
                             w,
                             "    pub const {const_name}: xcb_{prefix}{name}_t = {value};"
-                        )
-                        .unwrap();
+                        )?;
                     }
                 }
                 Type::TypeDef { value } => {
                     let field_type = ast.resolve_type_name(module, value);
-                    writeln!(w, "    pub type xcb_{prefix}{name}_t = {field_type};").unwrap();
-                    gen_iterator(&mut w, &prefix, &name);
+                    writeln!(w, "    pub type xcb_{prefix}{name}_t = {field_type};")?;
+                    gen_iterator(&mut w, &prefix, &name)?;
                 }
                 Type::Struct { fields } => {
-                    writeln!(w, "    #[repr(C)]").unwrap();
-                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub struct xcb_{prefix}{name}_t {{").unwrap();
-                    gen_fields(&mut w, module, &ast, fields);
-                    writeln!(w, "    }}").unwrap();
-                    gen_iterator(&mut w, &prefix, &name);
+                    writeln!(w, "    #[repr(C)]")?;
+                    writeln!(w, "    #[derive(Copy, Clone)]")?;
+                    writeln!(w, "    pub struct xcb_{prefix}{name}_t {{")?;
+                    gen_fields(&mut w, module, &ast, fields)?;
+                    writeln!(w, "    }}")?;
+                    gen_iterator(&mut w, &prefix, &name)?;
                 }
                 Type::Union { fields } => {
-                    writeln!(w, "    #[repr(C)]").unwrap();
-                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
-                    gen_fields(&mut w, module, &ast, fields);
-                    writeln!(w, "    }}").unwrap();
-                    gen_iterator(&mut w, &prefix, &name);
+                    writeln!(w, "    #[repr(C)]")?;
+                    writeln!(w, "    #[derive(Copy, Clone)]")?;
+                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{")?;
+                    gen_fields(&mut w, module, &ast, fields)?;
+                    writeln!(w, "    }}")?;
+                    gen_iterator(&mut w, &prefix, &name)?;
                 }
                 Type::EventStruct(EventStruct {
                     extension,
@@ -808,20 +814,19 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
                     events.sort_by_key(|e| e.number);
 
-                    writeln!(w, "    #[repr(C)]").unwrap();
-                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{").unwrap();
+                    writeln!(w, "    #[repr(C)]")?;
+                    writeln!(w, "    #[derive(Copy, Clone)]")?;
+                    writeln!(w, "    pub union xcb_{prefix}{name}_t {{")?;
                     for event in &events {
                         let event_name = convert_name(&event.name);
                         writeln!(
                             w,
                             "        pub {event_name}: xcb_{prefix}{event_name}_event_t,"
-                        )
-                        .unwrap();
+                        )?;
                     }
-                    writeln!(w, "        pub event_header: xcb_raw_generic_event_t,").unwrap();
-                    writeln!(w, "    }}").unwrap();
-                    gen_iterator(&mut w, &prefix, &name);
+                    writeln!(w, "        pub event_header: xcb_raw_generic_event_t,")?;
+                    writeln!(w, "    }}")?;
+                    gen_iterator(&mut w, &prefix, &name)?;
                 }
             }
         }
@@ -831,82 +836,81 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
             let opcode_name = request_name.to_uppercase();
             let opcode = request.opcode;
-            writeln!(w, "    pub const {opcode_name}: u32 = {opcode};").unwrap();
+            writeln!(w, "    pub const {opcode_name}: u32 = {opcode};")?;
 
             // Request struct
-            writeln!(w, "    #[repr(C)]").unwrap();
-            writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-            writeln!(w, "    pub struct {request_name}_request_t {{").unwrap();
+            writeln!(w, "    #[repr(C)]")?;
+            writeln!(w, "    #[derive(Copy, Clone)]")?;
+            writeln!(w, "    pub struct {request_name}_request_t {{")?;
 
             if module.extension_name.is_some() {
-                writeln!(w, "        pub major_opcode: u8,").unwrap();
-                writeln!(w, "        pub minor_opcode: u8,").unwrap();
-                writeln!(w, "        pub length: u16,").unwrap();
-                gen_fields(&mut w, module, &ast, &request.fields);
+                writeln!(w, "        pub major_opcode: u8,")?;
+                writeln!(w, "        pub minor_opcode: u8,")?;
+                writeln!(w, "        pub length: u16,")?;
+                gen_fields(&mut w, module, &ast, &request.fields)?;
             } else {
-                writeln!(w, "        pub major_opcode: u8,").unwrap();
+                writeln!(w, "        pub major_opcode: u8,")?;
                 if let Some(first) = request.fields.get(..1) {
-                    gen_fields(&mut w, module, &ast, first);
+                    gen_fields(&mut w, module, &ast, first)?;
                 } else {
-                    writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+                    writeln!(w, "        pub pad0: [u8; 1],")?;
                 }
-                writeln!(w, "        pub length: u16,").unwrap();
+                writeln!(w, "        pub length: u16,")?;
                 if let Some(rest) = request.fields.get(1..) {
-                    gen_fields(&mut w, module, &ast, rest);
+                    gen_fields(&mut w, module, &ast, rest)?;
                 }
             }
 
-            writeln!(w, "    }}").unwrap();
+            writeln!(w, "    }}")?;
 
             if let Some(reply) = &request.reply {
                 // Reply struct
-                writeln!(w, "    #[repr(C)]").unwrap();
-                writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                writeln!(w, "    pub struct {request_name}_reply_t {{").unwrap();
-                writeln!(w, "        pub response_type: u8,").unwrap();
+                writeln!(w, "    #[repr(C)]")?;
+                writeln!(w, "    #[derive(Copy, Clone)]")?;
+                writeln!(w, "    pub struct {request_name}_reply_t {{")?;
+                writeln!(w, "        pub response_type: u8,")?;
                 if let Some(first) = reply.fields.get(..1) {
-                    gen_fields(&mut w, module, &ast, first);
+                    gen_fields(&mut w, module, &ast, first)?;
                 } else {
-                    writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+                    writeln!(w, "        pub pad0: [u8; 1],")?;
                 }
-                writeln!(w, "        pub sequence: u16,").unwrap();
-                writeln!(w, "        pub length: u32,").unwrap();
+                writeln!(w, "        pub sequence: u16,")?;
+                writeln!(w, "        pub length: u32,")?;
                 if let Some(rest) = reply.fields.get(1..) {
-                    gen_fields(&mut w, module, &ast, rest);
+                    gen_fields(&mut w, module, &ast, rest)?;
                 }
-                writeln!(w, "    }}").unwrap();
+                writeln!(w, "    }}")?;
 
                 // Cookie struct
-                writeln!(w, "    #[repr(C)]").unwrap();
-                writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                writeln!(w, "    pub struct {request_name}_cookie_t {{").unwrap();
-                writeln!(w, "        pub sequence: c_uint,").unwrap();
-                writeln!(w, "    }}").unwrap();
+                writeln!(w, "    #[repr(C)]")?;
+                writeln!(w, "    #[derive(Copy, Clone)]")?;
+                writeln!(w, "    pub struct {request_name}_cookie_t {{")?;
+                writeln!(w, "        pub sequence: c_uint,")?;
+                writeln!(w, "    }}")?;
             }
 
             let mut args = Vec::<u8>::new();
-            writeln!(args, "            c: *mut xcb_connection_t,").unwrap();
+            writeln!(args, "            c: *mut xcb_connection_t,")?;
 
             for field in &request.fields {
                 let field_name = &field.name;
                 match &field.type_ {
                     FieldType::Name(type_name) => {
                         let field_type = ast.resolve_type_name(module, type_name);
-                        writeln!(args, "            {field_name}: {field_type},").unwrap();
+                        writeln!(args, "            {field_name}: {field_type},")?;
                     }
                     FieldType::List(type_name, length) => {
                         let resolved_type = ast.resolve_type_name(module, type_name);
                         if let Length::None = length {
-                            writeln!(args, "            {field_name}_len: u32,").unwrap();
+                            writeln!(args, "            {field_name}_len: u32,")?;
                         }
-                        writeln!(args, "            {field_name}: *const {resolved_type},")
-                            .unwrap();
+                        writeln!(args, "            {field_name}: *const {resolved_type},")?;
                     }
                     FieldType::Switch => {
-                        writeln!(args, "            {field_name}: *const c_void,").unwrap();
+                        writeln!(args, "            {field_name}: *const c_void,")?;
                     }
                     FieldType::Fd => {
-                        writeln!(args, "            {field_name}: i32,").unwrap();
+                        writeln!(args, "            {field_name}: i32,")?;
                     }
                     FieldType::Padding(_) => {
                         continue;
@@ -920,25 +924,25 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                 ("xcb_void", "_checked", "")
             };
 
-            writeln!(w, "    extern \"C\" {{").unwrap();
+            writeln!(w, "    extern \"C\" {{")?;
 
-            writeln!(w, "        pub fn {request_name}{checked}(").unwrap();
-            w.write(&args).unwrap();
-            writeln!(w, "        ) -> {cookie_type}_cookie_t;").unwrap();
+            writeln!(w, "        pub fn {request_name}{checked}(")?;
+            w.write(&args)?;
+            writeln!(w, "        ) -> {cookie_type}_cookie_t;")?;
 
-            writeln!(w, "        pub fn {request_name}{unchecked}(").unwrap();
-            w.write(&args).unwrap();
-            writeln!(w, "        ) -> {cookie_type}_cookie_t;").unwrap();
+            writeln!(w, "        pub fn {request_name}{unchecked}(")?;
+            w.write(&args)?;
+            writeln!(w, "        ) -> {cookie_type}_cookie_t;")?;
 
             if request.reply.is_some() {
-                writeln!(w, "        pub fn {request_name}_reply(").unwrap();
-                writeln!(w, "            c: *mut xcb_connection_t,").unwrap();
-                writeln!(w, "            cookie: {cookie_type}_cookie_t,").unwrap();
-                writeln!(w, "            e: *mut *mut xcb_generic_error_t,").unwrap();
-                writeln!(w, "        ) -> *mut {request_name}_reply_t;").unwrap();
+                writeln!(w, "        pub fn {request_name}_reply(")?;
+                writeln!(w, "            c: *mut xcb_connection_t,")?;
+                writeln!(w, "            cookie: {cookie_type}_cookie_t,")?;
+                writeln!(w, "            e: *mut *mut xcb_generic_error_t,")?;
+                writeln!(w, "        ) -> *mut {request_name}_reply_t;")?;
             }
 
-            writeln!(w, "    }}").unwrap();
+            writeln!(w, "    }}")?;
         }
 
         for event in &module.events {
@@ -946,7 +950,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
             let number_name = event_name.to_uppercase();
             let number = event.number;
-            writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
+            writeln!(w, "    pub const {number_name}: u32 = {number};")?;
 
             match &event.inner {
                 EventInner::Event {
@@ -976,43 +980,43 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                     }
 
                     if full_sequence_index.is_some() && align >= 8 {
-                        writeln!(w, "    #[repr(C, packed)]").unwrap();
+                        writeln!(w, "    #[repr(C, packed)]")?;
                     } else {
-                        writeln!(w, "    #[repr(C)]").unwrap();
+                        writeln!(w, "    #[repr(C)]")?;
                     }
-                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub struct {event_name}_event_t {{").unwrap();
+                    writeln!(w, "    #[derive(Copy, Clone)]")?;
+                    writeln!(w, "    pub struct {event_name}_event_t {{")?;
                     if *xge {
-                        writeln!(w, "        pub response_type: u8,").unwrap();
-                        writeln!(w, "        pub extension: u8,").unwrap();
-                        writeln!(w, "        pub sequence: u16,").unwrap();
-                        writeln!(w, "        pub length: u32,").unwrap();
-                        writeln!(w, "        pub event_type: u16,").unwrap();
+                        writeln!(w, "        pub response_type: u8,")?;
+                        writeln!(w, "        pub extension: u8,")?;
+                        writeln!(w, "        pub sequence: u16,")?;
+                        writeln!(w, "        pub length: u32,")?;
+                        writeln!(w, "        pub event_type: u16,")?;
                         if let Some(full_sequence_index) = full_sequence_index {
                             let (before, after) = fields.split_at(full_sequence_index);
-                            gen_fields(&mut w, module, &ast, before);
-                            writeln!(w, "        pub full_sequence: u32,").unwrap();
-                            gen_fields(&mut w, module, &ast, after);
+                            gen_fields(&mut w, module, &ast, before)?;
+                            writeln!(w, "        pub full_sequence: u32,")?;
+                            gen_fields(&mut w, module, &ast, after)?;
                         } else {
-                            gen_fields(&mut w, module, &ast, fields);
+                            gen_fields(&mut w, module, &ast, fields)?;
                         }
                     } else {
-                        writeln!(w, "        pub response_type: u8,").unwrap();
+                        writeln!(w, "        pub response_type: u8,")?;
                         if *sequence {
                             if let Some(first) = fields.get(..1) {
-                                gen_fields(&mut w, module, &ast, first);
+                                gen_fields(&mut w, module, &ast, first)?;
                             } else {
-                                writeln!(w, "        pub pad0: [u8; 1],").unwrap();
+                                writeln!(w, "        pub pad0: [u8; 1],")?;
                             }
-                            writeln!(w, "        pub sequence: u16,").unwrap();
+                            writeln!(w, "        pub sequence: u16,")?;
                             if let Some(rest) = fields.get(1..) {
-                                gen_fields(&mut w, module, &ast, rest);
+                                gen_fields(&mut w, module, &ast, rest)?;
                             }
                         } else {
-                            gen_fields(&mut w, module, &ast, fields);
+                            gen_fields(&mut w, module, &ast, fields)?;
                         }
                     }
-                    writeln!(w, "    }}").unwrap();
+                    writeln!(w, "    }}")?;
                 }
                 EventInner::Copy { ref_ } => {
                     let ref_module = ast.find_module_for_event(module, ref_).unwrap();
@@ -1022,7 +1026,7 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         String::new()
                     };
                     let ref_name = format!("xcb_{ref_prefix}{}_event_t", convert_name(ref_));
-                    writeln!(w, "    pub type {event_name}_event_t = {ref_name};").unwrap();
+                    writeln!(w, "    pub type {event_name}_event_t = {ref_name};")?;
                 }
             }
         }
@@ -1032,27 +1036,27 @@ pub fn gen(headers: &[&str], out_path: &Path) {
 
             let number_name = error_name.to_uppercase();
             let number = error.number;
-            writeln!(w, "    pub const {number_name}: u32 = {number};").unwrap();
+            writeln!(w, "    pub const {number_name}: u32 = {number};")?;
 
             match &error.inner {
                 ErrorInner::Error { fields } => {
-                    writeln!(w, "    #[repr(C)]").unwrap();
-                    writeln!(w, "    #[derive(Copy, Clone)]").unwrap();
-                    writeln!(w, "    pub struct {error_name}_error_t {{").unwrap();
-                    writeln!(w, "        pub response_type: u8,").unwrap();
-                    writeln!(w, "        pub error_code: u8,").unwrap();
-                    writeln!(w, "        pub sequence: u16,").unwrap();
+                    writeln!(w, "    #[repr(C)]")?;
+                    writeln!(w, "    #[derive(Copy, Clone)]")?;
+                    writeln!(w, "    pub struct {error_name}_error_t {{")?;
+                    writeln!(w, "        pub response_type: u8,")?;
+                    writeln!(w, "        pub error_code: u8,")?;
+                    writeln!(w, "        pub sequence: u16,")?;
                     if fields.len() < 1 {
-                        writeln!(w, "        pub bad_value: u32,").unwrap();
+                        writeln!(w, "        pub bad_value: u32,")?;
                     }
                     if fields.len() < 2 {
-                        writeln!(w, "        pub minor_opcode: u16,").unwrap();
+                        writeln!(w, "        pub minor_opcode: u16,")?;
                     }
                     if fields.len() < 3 {
-                        writeln!(w, "        pub major_opcode: u8,").unwrap();
+                        writeln!(w, "        pub major_opcode: u8,")?;
                     }
-                    gen_fields(&mut w, module, &ast, fields);
-                    writeln!(w, "    }}").unwrap();
+                    gen_fields(&mut w, module, &ast, fields)?;
+                    writeln!(w, "    }}")?;
                 }
                 ErrorInner::Copy { ref_ } => {
                     let ref_module = ast.find_module_for_error(module, ref_).unwrap();
@@ -1062,11 +1066,13 @@ pub fn gen(headers: &[&str], out_path: &Path) {
                         String::new()
                     };
                     let ref_name = format!("xcb_{ref_prefix}{}_error_t", convert_name(ref_));
-                    writeln!(w, "    pub type {error_name}_error_t = {ref_name};").unwrap();
+                    writeln!(w, "    pub type {error_name}_error_t = {ref_name};")?;
                 }
             }
         }
 
-        writeln!(w, "}}").unwrap();
+        writeln!(w, "}}")?;
     }
+
+    Ok(())
 }
